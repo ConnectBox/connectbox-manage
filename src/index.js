@@ -62,6 +62,9 @@ app.put('/admin/api/weblog', function(req,res) {
 		req.body.value.deviceProvider = 'connectbox';
 		req.body.value.deviceIdentifier = boxid;
 		fs.appendFileSync('/var/log/connectbox/connectbox_enhanced.json',JSON.stringify(req.body.value) + '\n');
+		if (fs.existsSync('/usr/local/connectbox/bin/mariadbWebLogInsert.py')) {
+			execSync(`/usr/local/connectbox/bin/mariadbWebLogInsert.py '${JSON.stringify(req.body.value)}'`);
+		}
 		res.sendStatus(200);
  	}
  	catch (err) {
