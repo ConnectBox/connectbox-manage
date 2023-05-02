@@ -265,29 +265,24 @@ doCommand.reboot = function() {
 
 //DICT:GET:subscriptions: Returns a list of subscriptions available on the server
 get.subscriptions = function() {
-	if (!get.ismoodle()) {
-		return ([])
-	}
-	else {
-		var current = get.subscribe();
-		var server = getBrand('server_url') || execute (`sudo -u www-data php /var/www/moodle/local/chat_attachments/get_server_url.php`);
-		try {
-			var data = JSON.parse(execute(`curl -sL ${server}/chathost/link/openwell`));
-			var response = [];
-			for (var record of data) {
-				var isSelected = false;
-				if (current === record.package) {
-					isSelected = true;
-				}
-				if (record['is_slim']) {
-					response.push({name:record.package,value:`${server}/chathost/link/openwell?packageName=${encodeURI(record.package)}`,isSelected:isSelected});
-				}
+	var current = get.subscribe();
+	var server = getBrand('server_url') || execute (`sudo -u www-data php /var/www/moodle/local/chat_attachments/get_server_url.php`);
+	try {
+		var data = JSON.parse(execute(`curl -sL ${server}/chathost/link/openwell`));
+		var response = [];
+		for (var record of data) {
+			var isSelected = false;
+			if (current === record.package) {
+				isSelected = true;
 			}
-			return (response);
+			if (record['is_slim']) {
+				response.push({name:record.package,value:`${server}/chathost/link/openwell?packageName=${encodeURI(record.package)}`,isSelected:isSelected});
+			}
 		}
-		catch(err) {
-			return({status:404,message:"Server URL is not reachable"});
-		}
+		return (response);
+	}
+	catch(err) {
+		return({status:404,message:"Server URL is not reachable"});
 	}
 }
 //DICT:GET:package: Returns the current openwell content package name
