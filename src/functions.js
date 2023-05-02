@@ -241,7 +241,7 @@ get.ismoodle = function() {
 //DICT:DO:sync: Start manual sync to Cloud Server
 doCommand.sync = function() {
 	execute('sudo chmod 666 /tmp/*.log');
-	if (fs.existsSync('/var/www/moodle/index.php')) {
+	if (get.ismoodle()) {
 		exec(`sudo -u www-data /usr/bin/php /var/www/moodle/local/chat_attachments/push_messages.php true >/tmp/push_messages.log 2>&1`);
 		return('Syncing Moodle With Server');
 	}
@@ -265,25 +265,30 @@ doCommand.reboot = function() {
 
 //DICT:GET:subscriptions: Returns a list of subscriptions available on the server
 get.subscriptions = function() {
-	var current = get.subscribe();
-	var server = getBrand('server_url') || execute (`sudo -u www-data php /var/www/moodle/local/chat_attachments/get_server_url.php`);
-	try {
-		var data = JSON.parse(execute(`curl -sL ${server}/chathost/link/openwell`));
-		var response = [];
-		for (var record of data) {
-			var isSelected = false;
-			if (current === record.package) {
-				isSelected = true;
+	if (!get.ismoodle()) {
+		return ([])
+	}
+	else {
+		var current = get.subscribe();
+		var server = getBrand('server_url') || execute (`sudo -u www-data php /var/www/moodle/local/chat_attachments/get_server_url.php`);
+		try {
+			var data = JSON.parse(execute(`curl -sL ${server}/chathost/link/openwell`));
+			var response = [];
+			for (var record of data) {
+				var isSelected = false;
+				if (current === record.package) {
+					isSelected = true;
+				}
+				if (record['is_slim']) {
+					response.push({name:record.package,value:`${server}/chathost/link/openwell?packageName=${encodeURI(record.package)}`,isSelected:isSelected});
+				}
 			}
-			if (record['is_slim']) {
-				response.push({name:record.package,value:`${server}/chathost/link/openwell?packageName=${encodeURI(record.package)}`,isSelected:isSelected});
-			}
+			return (response);
 		}
-		return (response);
- 	}
- 	catch(err) {
- 		return({status:404,message:"Server URL is not reachable"});
- 	}
+		catch(err) {
+			return({status:404,message:"Server URL is not reachable"});
+		}
+	}
 }
 //DICT:GET:package: Returns the current openwell content package name
 get.package = function() {
