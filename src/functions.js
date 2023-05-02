@@ -246,7 +246,7 @@ doCommand.sync = function() {
 		return('Syncing Moodle With Server');
 	}
 	else {
-		exec(`sudo -u www-data /usr/local/connectbox/bin/phonehome.py >/tmp/push_messages.log  2>&1`);
+		exec(`/usr/local/connectbox/bin/phonehome.py >/tmp/push_messages.log  2>&1`);
 		return('Syncing Without Moodle');
 	}
 }
