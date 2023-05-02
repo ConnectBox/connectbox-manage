@@ -462,8 +462,8 @@ function setBrand(body) {
 
 //DICT:GET:topten: Get top 10 Content Viewing Logs
 get.topten = function (json){
-	var logString = execute("cat /var/log/connectbox/connectbox_enhanced* |grep mediaIdentifier");
-	var logArray = logString.split('\n');
+	var logString = execute("cat /var/log/connectbox/connectbox_enhanced* |grep mediaIdentifier >/var/log/connectbox/connectbox_summary_enhanced.txt");
+	var logArray = fs.readFileSync('/var/log/connectbox/connectbox_summary_enhanced.txt').toString().split('\n');
 	var hits = {hour:[],day:[],week:[],month:[],year:[]};
 	var times = {hour:60*60,day:60*60*24,week: 60*60*24*7, month: 60*60*24*30, year: 60*60*24*365};
 	var now = Math.round(Date.now() / 1000);
@@ -478,6 +478,7 @@ get.topten = function (json){
 
 		}
 		catch (err) {
+			console.log(`get.topten: No Data Available`);
 			continue;
 		}
 	}
@@ -486,10 +487,9 @@ get.topten = function (json){
 }
 //DICT:GET:stats: Get Detailed Content Viewing Logs By Period
 get.stats = function (json){
-	var logString = execute("cat /var/log/connectbox/connectbox_enhanced* |grep mediaIdentifier");
+	var logString = execute("cat /var/log/connectbox/connectbox_enhanced* |grep mediaIdentifier >/var/log/connectbox/connectbox_summary_enhanced.txt");
+	var logArray = fs.readFileSync('/var/log/connectbox/connectbox_summary_enhanced.txt').toString().split('\n');
 	var hits = {week:{},month:{},year:{}};
-	if (logString.includes('Error: Command failed:')) { return (hits) }
-	var logArray = logString.split('\n');
 	for (var log of logArray) {
 		try {
 			log = JSON.parse(log);
@@ -506,7 +506,8 @@ get.stats = function (json){
 			hits.week[logDates.week].push(log.mediaIdentifier)
 		}
 		catch (err) {
-			console.log(log,err)
+			//console.log(log,err)
+			console.log(`get.stats: No Data Available`);
 			continue;
 		}
 	}
@@ -525,8 +526,8 @@ get.stats = function (json){
 
 //DICT:GET:weblog: Get all Content Viewing Logs
 get.weblog = function (json){
-	var logString = execute("cat /var/log/connectbox/connectbox_enhanced* |grep mediaIdentifier");
-	var logArray = logString.split('\n');
+	var logString = execute("cat /var/log/connectbox/connectbox_enhanced* |grep mediaIdentifier >/var/log/connectbox/connectbox_summary_enhanced.txt");
+	var logArray = fs.readFileSync('/var/log/connectbox/connectbox_summary_enhanced.txt').toString().split('\n');
 	var response = [];
 	var logs = [];
 	// Load the rows, parse in JSON
@@ -536,6 +537,7 @@ get.weblog = function (json){
 			logs.push(log);
 		}
 		catch (err) {
+			console.log(`get.weblog: No Data Available`);
 			continue;
 		}
 	}
@@ -544,8 +546,8 @@ get.weblog = function (json){
 }
 //DICT:GET:syncweblog: Get Content Viewing Logs since last get
 get.syncweblog = function (json){
-	var logString = execute("cat /var/log/connectbox/connectbox_enhanced*");
-	var logArray = logString.split('\n');
+	var logString = execute("cat /var/log/connectbox/connectbox_enhanced* |grep mediaIdentifier >/var/log/connectbox/connectbox_summary_enhanced.txt");
+	var logArray = fs.readFileSync('/var/log/connectbox/connectbox_summary_enhanced.txt').toString().split('\n');
 	var response = [];
 	var logs = [];
 	// Load the rows, parse in JSON
@@ -555,6 +557,7 @@ get.syncweblog = function (json){
 			logs.push(log);
 		}
 		catch (err) {
+			console.log(`get.syncweblog: No Data Available`);
 			continue;
 		}
 	}
