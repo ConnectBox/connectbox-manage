@@ -266,7 +266,10 @@ doCommand.reboot = function() {
 //DICT:GET:subscriptions: Returns a list of subscriptions available on the server
 get.subscriptions = function() {
 	var current = get.subscribe();
-	var server = getBrand('server_url') || execute (`sudo -u www-data php /var/www/moodle/local/chat_attachments/get_server_url.php`);
+	var server = getBrand('server_url');
+	if (get.ismoodle()) {
+			server = execute (`sudo -u www-data php /var/www/moodle/local/chat_attachments/get_server_url.php`);
+	}
 	try {
 		var data = JSON.parse(execute(`curl -sL ${server}/chathost/link/openwell`));
 		var response = [];
