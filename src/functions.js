@@ -244,10 +244,10 @@ get.isconnected = function() {
 //DICT:GET:ismoodle: Returns 1 if Moodle is present
 get.ismoodle = function() {
 	if (fs.existsSync('/var/www/moodle/index.php')) {
-		return('1');
+		return(true);
 	}
 	else {
-		return('0');
+		return(false);
 	}
 }
 
@@ -278,33 +278,35 @@ doCommand.reboot = function() {
 
 //DICT:GET:subscriptions: Returns a list of subscriptions available on the server
 get.subscriptions = function() {
+	var current = get.subscribe();
+	var server = getBrand('server_url') || '';
 	if (!isConnected) {
 		return({status:404,message:"Not Connected To Internet"});
 	}
-	var current = get.subscribe();
-	var server = getBrand('server_url');
-	if (get.ismoodle()) {
-			server = execute (`sudo -u www-data php /var/www/moodle/local/chat_attachments/get_server_url.php`);
+	else if (get.ismoodle()) {
+			//server = execute (`sudo -u www-data php /var/www/moodle/local/chat_attachments/get_server_url.php`);
 	}
 	if (!server.includes('http')) {
 		return({status:404,message:"Invalid URL"});	
 	}
-	try {
-		var data = JSON.parse(execute(`curl -sL --connect-timeout 15 ${server}/chathost/link/openwell`));
-		var response = [];
-		for (var record of data) {
-			var isSelected = false;
-			if (current === record.package) {
-				isSelected = true;
+	else {
+		try {
+			var data = JSON.parse(execute(`curl -sL --connect-timeout 15 ${server}/chathost/link/openwell`));
+			var response = [];
+			for (var record of data) {
+				var isSelected = false;
+				if (current === record.package) {
+					isSelected = true;
+				}
+				if (record['is_slim']) {
+					response.push({name:record.package,value:`${server}/chathost/link/openwell?packageName=${encodeURI(record.package)}`,isSelected:isSelected});
+				}
 			}
-			if (record['is_slim']) {
-				response.push({name:record.package,value:`${server}/chathost/link/openwell?packageName=${encodeURI(record.package)}`,isSelected:isSelected});
-			}
+			return (response);
 		}
-		return (response);
-	}
-	catch(err) {
-		return({status:404,message:"Server URL is not reachable"});
+		catch(err) {
+			return({status:404,message:"Server URL is not reachable"});
+		}
 	}
 }
 //DICT:GET:package: Returns the current openwell content package name
