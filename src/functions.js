@@ -18,6 +18,8 @@ var del = {};
 var set = {};
 var doCommand = {};
 
+var isConnected = execute ("curl --connect-timeout 2 -sI google.com |head -n 1|cut -d$' ' -f2 ") || false;
+
 var logSources = {
 	"wifistatus":'connectboxmanage get wifistatus',
 	"connectboxmanage":'sudo pm2 logs --lines 100 --nostream',
@@ -228,6 +230,17 @@ set.hostname = function (json){
 	return (true)
 }
 
+//DICT:GET:isconnected: Returns true if box has ping to Google
+get.isconnected = function() {
+	var response = execute ("curl --connect-timeout 2 -sI google.com |head -n 1|cut -d$' ' -f2 ") || false;
+	if (response) {
+		return (true);
+	}
+	else {
+		return (false);
+	}
+}
+
 //DICT:GET:ismoodle: Returns 1 if Moodle is present
 get.ismoodle = function() {
 	if (fs.existsSync('/var/www/moodle/index.php')) {
@@ -265,13 +278,19 @@ doCommand.reboot = function() {
 
 //DICT:GET:subscriptions: Returns a list of subscriptions available on the server
 get.subscriptions = function() {
+	if (!isConnected) {
+		return({status:404,message:"Not Connected To Internet"});
+	}
 	var current = get.subscribe();
 	var server = getBrand('server_url');
 	if (get.ismoodle()) {
 			server = execute (`sudo -u www-data php /var/www/moodle/local/chat_attachments/get_server_url.php`);
 	}
+	if (!server.includes('http')) {
+		return({status:404,message:"Invalid URL"});	
+	}
 	try {
-		var data = JSON.parse(execute(`curl -sL ${server}/chathost/link/openwell`));
+		var data = JSON.parse(execute(`curl -sL --connect-timeout 15 ${server}/chathost/link/openwell`));
 		var response = [];
 		for (var record of data) {
 			var isSelected = false;
