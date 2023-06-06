@@ -53,6 +53,29 @@ app.get('/admin/api/ismoodle', function(req,res) {
 	res.send(data);
 })
 
+app.get('/admin/api/downloadweblog', function(req,res) {
+	logger.log('debug', `${req.method} ${req.originalUrl}`);
+	var columns = ['boxid', 'mediaIdentifier', 'interactionType', 'mediaType', 'mediaLanguage', 'mediaProvider', 'date'];
+	var data = [];
+	data.push(columns);
+	var getData = functions.get.weblog();
+	for (var item of getData) {
+		var fitem = [];
+		item.date = moment(item.timestamp * 1000).format('LLL');
+		item.boxid = boxid();
+		for (var col of columns) {
+			fitem.push(item[col] || '');
+		}
+		data.push(fitem);
+	}
+	var rows = [];
+	for (var item of data) {
+		rows.push('"' + item.join('","') + '"');
+	}
+	res.type('text/csv');
+	res.send (rows.join('\n'))
+});
+
 app.put('/admin/api/weblog', function(req,res) {
 	logger.log('debug', `${req.method} ${req.originalUrl}: ${req.body.value.mediaIdentifier}`);
 	try {
