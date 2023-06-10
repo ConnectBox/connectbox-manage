@@ -462,25 +462,36 @@ function setBrand(body) {
 	brand = JSON.parse(fs.readFileSync('/usr/local/connectbox/brand.txt'));
 	var key = body.value.split('=')[0];
 	var val = body.value.split('=')[1];
-	try {
-		brand[key] = parseInt(val);
-		if (isNaN(brand[key])) {
-			brand[key] = val;
+	for (var brandKey of Object.keys(brand)) {
+		if (key === 'lcd_pages_stats') {
+			break; // Take this key if present
+		}
+		else if (brandKey.toLowerCase() === key) {
+			key = brandKey;
+			break;  // Take the first match in the list
 		}
 	}
-	catch {
-		brand[key] = val;
-	}
-	// One key sets a few lcd_pages_stats values so loop through and update all of them
-	if (key === 'lcd_pages_stats') {
-		delete brand[key];  // Don't keep lcd_pages_stats
-		for (var pagekey of Object.keys(brand))	 {
-			if (pagekey.startsWith(key)) {
-				brand[pagekey] = val; // Example: lcd_pages_stats_hour_one = 1
+	if (key) {
+		try {
+			brand[key] = parseInt(val);
+			if (isNaN(brand[key])) {
+				brand[key] = val;
 			}
 		}
+		catch {
+			brand[key] = val;
+		}
+		// One key sets a few lcd_pages_stats values so loop through and update all of them
+		if (key === 'lcd_pages_stats') {
+			delete brand[key];  // Don't keep lcd_pages_stats
+			for (var pagekey of Object.keys(brand))	 {
+				if (pagekey.startsWith(key)) {
+					brand[pagekey] = val; // Example: lcd_pages_stats_hour_one = 1
+				}
+			}
+		}
+		fs.writeFileSync('/usr/local/connectbox/brand.txt',JSON.stringify(brand));
 	}
-	fs.writeFileSync('/usr/local/connectbox/brand.txt',JSON.stringify(brand));
 	return(body.value);
 }
 
