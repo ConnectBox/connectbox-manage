@@ -4,7 +4,6 @@ const
 	{ exec } = require('child_process'),
 	fs = require('fs'),
 	moment = require('moment'),
-  lms = require('./lms-api'),
 	request = require('request'),
   Logger = require('./logger.js'),
   logger = new Logger(configs.logging);
@@ -223,10 +222,8 @@ get.hostname = function (){
 set.hostname = function (json){
 	fs.writeFileSync('/etc/hostname',`${json.value}`);  // set hostname
 	setBrand({value:`Brand=${json.value}`}); // set in brands.txt
-	execute(`sudo sed -i -e "/server_name / s/server_name .*/server_name learn.${json.value} learn.thewell learn.connectbox;/" /etc/nginx/sites-enabled/connectbox_moodle.conf`)
 	execute(`sudo sed -i -e "/server_name / s/server_name .*/server_name ${json.value} thewell connectbox;/" /etc/nginx/sites-enabled/connectbox_enhanced.conf`)
 	// The http://  value must be handled with \\\/\\\/ because it has to double escape the slashes due to regexp
-	execute(`sudo sed -i -e "/wwwroot / s/=.*/= 'http:\\\/\\\/${json.value.toLowerCase()}';/" /var/www/moodle/config.php`)
 	execute('nginx -s reload') // Restart nginx now
 	return (true)
 }
@@ -244,12 +241,7 @@ get.isconnected = function() {
 
 //DICT:GET:ismoodle: Returns 1 if Moodle is present
 get.ismoodle = function() {
-	if (fs.existsSync('/var/www/moodle/index.php')) {
-		return(true);
-	}
-	else {
-		return(false);
-	}
+	return(false);
 }
 
 //DICT:DO:sync: Start manual sync to Cloud Server
@@ -655,84 +647,6 @@ set.disable_stats = function (json){
  	catch (err) {
  		return false;
  	}
-}
-
-/**
- * Moodle functions
- */
-//NODICT:GET:lms_courses (id?): Get a list of courses from the LMS. If id is supplied, get the specific course.
-get.lms_courses = function (id) {
-  if (id) {
-    return lms.get_course(id).then((response) =>  response);
-  }
-  return lms.get_courses().then((response) =>  response);
-}
-//NODICT:DEL:lms_courses (id?): Delete the given course.
-del.lms_courses = function (id) {
-  return lms.delete_course(id).then((response) =>  response);
-}
-//NODICT:PUT:lms_courses (json): Update an existing course for the LMS. JSON must have an id set.
-put.lms_courses = function (json) {
-  let data = json;
-  try {
-    data = JSON.parse(json);
-  } catch (e) {
-  }
-  if (!('id' in data)) {
-    return 'You must provide a valid id!';
-  }
-  const id = data.id;
-  return lms.put_course(id, data).then((response) =>  response);
-}
-//NODICT:GET:lms_courses_roster (course_id): Get a list of users in the given course.
-get.lms_courses_roster = function (id) {
-  return lms.get_course_roster(id).then((response) =>  response);
-}
-//NODICT:PUT:lms_enroll_user (course_id, user_id, json): Enroll a user into a course. By default enrolls as student.  In JSON body set roleid to change role.
-put.lms_enroll_user = function (courseid, userid, json) {
-  let data = json;
-  try {
-    data = JSON.parse(json);
-  } catch (e) {
-  }
-  return lms.enroll_course_roster_user(courseid, userid, data).then((response) =>  response);
-}
-//NODICT:DEL:lms_unenroll_user (course_id, user_id): Unenroll a user from a course.
-del.lms_unenroll_user = function (courseid, userid) {
-  return lms.unenroll_course_roster_user(courseid, userid).then((response) =>  response);
-}
-//NODICT:GET:lms_users (id?): Get a list of users from the LMS. If id is supplied, get the specific user.
-get.lms_users = function (id) {
-  if (id) {
-    return lms.get_user(id).then((response) =>  response);
-  }
-  return lms.get_users().then((response) =>  response);
-}
-//NODICT:POST:lms_users (json): Create a new user for the LMS
-post.lms_users = function (json) {
-  let data = json;
-  try {
-    data = JSON.parse(json);
-  } catch (e) {
-  }
-  return lms.post_user(data).then((response) =>  response);
-}
-//NODICT:PUT:lms_users (json): Update an existing user for the LMS. JSON must have an id set.
-put.lms_users = function (json) {
-  let data = json;
-  try {
-    data = JSON.parse(json);
-  } catch (e) {
-  }
-  if (!('id' in data)) {
-    return 'You must provide a valid id!';
-  }
-  const id = data.id;
-  return lms.put_user(id, data).then((response) =>  response);
-}
-//NODICT:DEL:lms_users (id): Delete a user from the LMS
-del.lms_users = function (id) {
-  return lms.delete_user(id).then((response) =>  response);
 }
 
 function execute(command) {
