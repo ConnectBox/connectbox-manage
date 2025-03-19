@@ -76,6 +76,12 @@ app.get('/admin/api/downloadweblog', function(req,res) {
 	res.send (rows.join('\n'))
 });
 
+app.get('/admin/api/deleteweblog', function(req,res) {
+	logger.log('debug', `${req.method} ${req.originalUrl}`);
+	res.send ([])
+});
+
+
 app.put('/admin/api/weblog', function(req,res) {
 	logger.log('debug', `${req.method} ${req.originalUrl}: ${req.body.value.mediaIdentifier}`);
 	try {
