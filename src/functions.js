@@ -488,8 +488,8 @@ function setBrand(body) {
 	return(body.value);
 }
 
-//DICT:GET:deleteweblog: Clear all Content Viewing Logs
-get.deleteweblog = function (){
+//DICT:DO:deleteweblog: Clear all Content Viewing Logs
+doCommand.deleteweblog = function (){
 	execute("sudo rm -rf /var/log/connectbox/connectbox_enhanced*");
 	execute("sudo rm -rf /var/log/connectbox/connectbox_summary_enhanced.txt");
 	execute("sudo rm -rf /var/log/connectbox/connectbox_enhanced.json");
