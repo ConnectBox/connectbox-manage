@@ -464,7 +464,11 @@ function setBrand(body) {
 			break;  // Take the first match in the list
 		}
 	}
-	if (key) {
+	if (key === 'server_siteadmin_phone') {
+		// This needs to be a string so we don't run it through the logic below with parseInt
+		brand[key] = val;
+	}
+	else if (key) {
 		try {
 			brand[key] = parseInt(val);
 			if (isNaN(brand[key])) {
