@@ -1,3 +1,19 @@
+/**
+ * @fileoverview Device management function library for connectbox-manage.
+ *
+ * Exposes four namespaced objects (get, set, doCommand, del) whose keys map
+ * directly to the CLI surface exposed by the connectboxmanage CLI and the
+ * /admin/api REST endpoints in routes/api.js.
+ *
+ * Each key on these objects is a function that reads or mutates device state.
+ * The DICT: comment above each function is the canonical API description used
+ * by the CLI's help output and by the admin UI — do not remove them.
+ *
+ * Helper functions at the bottom of the file (execute, boolify, topKFrequent,
+ * sortArrayByTimestamp, getBrand, setBrand) are exported so index.js can call
+ * them directly for routes that don't fit the generic get/set/doCommand pattern.
+ */
+
 const
   configs = require('./configs.js'),
 	{execSync}= require("child_process"),
@@ -8,8 +24,13 @@ const
   Logger = require('./logger.js'),
   logger = new Logger(configs.logging);
 
-var brand = JSON.parse(fs.readFileSync('/usr/local/connectbox/brand.txt'));
+// Load brand config at startup so it's available for the exports object.
+// Individual get/set functions re-read the file each time to pick up changes.
+var brand = JSON.parse(fs.readFileSync('/usr/local/connectbox/brand.j2'));
 
+// Namespaced function tables.  index.js and routes/api.js index into these
+// by key name derived from the request URL (e.g. GET /admin/api/apssid →
+// get.apssid()).
 var get = {};
 var post = {};
 var put = {};
@@ -17,8 +38,12 @@ var del = {};
 var set = {};
 var doCommand = {};
 
+// Probe internet connectivity once at startup.  Used by get.subscriptions()
+// to short-circuit before attempting a remote curl call.
 var isConnected = execute ("curl --connect-timeout 2 -sI google.com |head -n 1|cut -d$' ' -f2 ") || false;
 
+// Shell commands for each named log source.  Keys are the valid values for
+// GET /admin/api/logs/:log.
 var logSources = {
 	"wifistatus":'connectboxmanage get wifistatus',
 	"connectboxmanage":'sudo pm2 logs --lines 100 --nostream',
@@ -27,6 +52,11 @@ var logSources = {
 	"sync": 'cat /tmp/push_messages.log'
 }
 
+/**
+ * Stub auth function — authentication is handled in index.js.
+ * Kept here so the module exports object remains backward-compatible.
+ * @param {string} password - Ignored.
+ */
 function auth (password) {
 	console.log(auth);
 }
@@ -432,17 +462,36 @@ get.logsources = function() {
 	return(Object.keys(logSources))
 }
 
-//DICT:GET:logs: (log name) Retrieves log and formats for Admin log viewer
+/**
+ * Retrieve the output of a named log source as a keyed object.
+ *
+ * Executes the shell command registered in logSources for the given name and
+ * returns it as {logName: <output>} so the caller gets a consistently shaped
+ * object regardless of which log was requested.
+ *
+ * @param {string} logName - One of the keys defined in logSources
+ *   (e.g. 'webserver', 'wifistatus').
+ * @returns {{[logName: string]: string}} Shell output wrapped in a keyed object.
+ */
 function getLogs(logName) {
-	var response = {
-	};
+	var response = {};
 	response[logName] = execute(logSources[logName]);
 	return(response);
 }
 
-//DICT:GET:brand: Get value from brand.txt.  Must include a value such as Image
+/**
+ * Read a single key from the brand.j2 device configuration file.
+ *
+ * Re-reads brand.j2 on every call so changes made by setBrand() are reflected
+ * without restarting the server.  The special key 'lcd_pages_stats' is an
+ * alias that maps to 'lcd_pages_stats_day_one' — the actual stored key —
+ * because the admin UI uses the shorter alias name.
+ *
+ * @param {string} key - Brand config key (e.g. 'Brand', 'server_url').
+ * @returns {*} The value for the key, or 0 if the key does not exist.
+ */
 function getBrand(key) {
-	var brand = JSON.parse(fs.readFileSync('/usr/local/connectbox/brand.txt'));
+	var brand = JSON.parse(fs.readFileSync('/usr/local/connectbox/brand.j2'));
 	if (key === 'lcd_pages_stats') {
 		// Special case where lcd_page_stats is a rollup of several settings
 		key = 'lcd_pages_stats_day_one';
@@ -450,11 +499,27 @@ function getBrand(key) {
 	return(brand[key] || 0);
 }
 
-//DICT:SET:brand (key=value): Set value in brand.txt where value is like Image=connectbox_logo.png
+/**
+ * Write a key=value pair into the brand.j2 device configuration file.
+ *
+ * Accepts a body object with a 'value' string in 'Key=Value' format (matching
+ * the CLI convention).  Key matching is case-insensitive so 'brand' and 'Brand'
+ * both resolve to the correct stored key.
+ *
+ * Special behaviours:
+ * - 'server_siteadmin_phone' is stored as a string to prevent parseInt
+ *   from mangling phone numbers with leading zeros.
+ * - 'lcd_pages_stats' is a virtual key that fans out to every key in brand.j2
+ *   that starts with 'lcd_pages_stats_' (e.g. lcd_pages_stats_hour_one).
+ *
+ * @param {{value: string}} body - Object with a 'Key=Value' value string.
+ * @returns {string} The original body.value string echoed back to the caller.
+ */
 function setBrand(body) {
-	brand = JSON.parse(fs.readFileSync('/usr/local/connectbox/brand.txt'));
+	brand = JSON.parse(fs.readFileSync('/usr/local/connectbox/brand.j2'));
 	var key = body.value.split('=')[0];
 	var val = body.value.split('=')[1];
+	// Case-insensitive key lookup — find the actual stored key name.
 	for (var brandKey of Object.keys(brand)) {
 		if (key === 'lcd_pages_stats') {
 			break; // Take this key if present
@@ -469,6 +534,7 @@ function setBrand(body) {
 		brand[key] = val;
 	}
 	else if (key) {
+		// Try to store as integer; fall back to string if parseInt returns NaN.
 		try {
 			brand[key] = parseInt(val);
 			if (isNaN(brand[key])) {
@@ -478,16 +544,17 @@ function setBrand(body) {
 		catch {
 			brand[key] = val;
 		}
-		// One key sets a few lcd_pages_stats values so loop through and update all of them
+		// lcd_pages_stats is a virtual rollup key — fan the value out to every
+		// individual lcd_pages_stats_* key rather than storing the alias itself.
 		if (key === 'lcd_pages_stats') {
 			delete brand[key];  // Don't keep lcd_pages_stats
-			for (var pagekey of Object.keys(brand))	 {
+			for (var pagekey of Object.keys(brand)) {
 				if (pagekey.startsWith(key)) {
 					brand[pagekey] = val; // Example: lcd_pages_stats_hour_one = 1
 				}
 			}
 		}
-		fs.writeFileSync('/usr/local/connectbox/brand.txt',JSON.stringify(brand));
+		fs.writeFileSync('/usr/local/connectbox/brand.j2',JSON.stringify(brand));
 	}
 	return(body.value);
 }
@@ -661,6 +728,16 @@ set.disable_stats = function (json){
  	}
 }
 
+/**
+ * Run a shell command synchronously and return its trimmed stdout.
+ *
+ * Returns the error message string instead of throwing on non-zero exit so
+ * callers don't need try/catch for every shell invocation.  The trailing
+ * newline is stripped so callers can compare the result directly to a string.
+ *
+ * @param {string} command - Shell command to execute via execSync.
+ * @returns {string} stdout with trailing newline removed, or error message.
+ */
 function execute(command) {
 	var response = ''
 	try {
@@ -671,6 +748,16 @@ function execute(command) {
 	}
 }
 
+/**
+ * Coerce a value to a 1/0 integer boolean suitable for storage in brand.j2.
+ *
+ * Accepts '1', 1, and 'true' (case-insensitive) as truthy; everything else
+ * becomes 0.  Used by set.disable_chat and set.disable_stats so the config
+ * file always stores a numeric flag rather than a mix of strings and integers.
+ *
+ * @param {string|number} value - Raw value from the request body.
+ * @returns {0|1}
+ */
 function boolify(value) {
 	if (value == "1" || value === 1 || (typeof value === 'string' && value.toLowerCase() === 'true')) {
 		return 1;
@@ -680,13 +767,26 @@ function boolify(value) {
 	}
 }
 
+/**
+ * Return the top k most frequently occurring strings in an array.
+ *
+ * Used by get.topten() and get.stats() to rank content items by access count.
+ * Builds a frequency hash, sorts entries descending by count, and returns the
+ * top k as [{resource, count}] objects matching the format expected by the HAT
+ * display service and the admin reporting UI.
+ *
+ * @param {string[]} arrayOfStrings - Array of content identifiers (may contain duplicates).
+ * @param {number} k - Maximum number of results to return.
+ * @returns {{resource: string, count: number}[]} Top k items ordered by frequency.
+ */
 function topKFrequent(arrayOfStrings, k) {
-	// Takes in arrayOfStrings (titles of content) and returns top k most frequent items in the list
+	// Build a frequency map: key → occurrence count.
     let hash = {}
     for (let key of arrayOfStrings) {
         if (!hash[key]) hash[key] = 0
         hash[key]+= 1 || 1;
     }
+    // Sort entries by count descending and slice to k.
     const hashToArray = Object.entries(hash)
     const sortedArray = hashToArray.sort((a,b) => b[1] - a[1])
     const sortedElements = sortedArray.map(val => val[0])
@@ -697,6 +797,16 @@ function topKFrequent(arrayOfStrings, k) {
     return response;
 }
 
+/**
+ * Comparator for Array.sort() that orders log objects by unix timestamp ascending.
+ *
+ * Used by get.weblog() and get.syncweblog() to produce a chronological event
+ * list regardless of which log file each line came from.
+ *
+ * @param {{timestamp: number}} a
+ * @param {{timestamp: number}} b
+ * @returns {-1|0|1}
+ */
 function sortArrayByTimestamp( a, b ) {
   if ( a.timestamp < b.timestamp ){
     return -1;
