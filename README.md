@@ -6,6 +6,15 @@ This is a node.js javascript application leveraging a common library of manageme
 * The application is written in nodejs and runs in the pm2 process handler for nodejs applications.  The API is available on port 5002.
 * The CLI is written in python and converts command line arguments into API calls hitting the localhost:5002 API.  This was done due to performance issues with the nodejs CLI on low capability CPUs.
 
+# Admin sign-in and the session key
+The admin pages sign in with the password in `/usr/local/connectbox/etc/basicauth` and get a
+signed session cookie (`connectbox`). Each box signs these cookies with its **own** random key,
+created the first time the app starts and kept in `/usr/local/connectbox/admin_session.key`
+(root only), so sign-ins survive restarts. Deleting the file makes the box create a new key and
+signs everyone out. connectbox-pi's image preparation deletes it, so boxes made from a release
+image each create their own. Never put a fixed key in the source: anyone who knows it can forge
+an admin sign-in.
+
 # Installation and Development
 Connectbox-pi Ansible will install this application but should you want to install on another machine or for development:
 * git clone the repo to your machine.
