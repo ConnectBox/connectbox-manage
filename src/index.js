@@ -36,6 +36,44 @@ var chats = {};
 var boxid = functions.get['hostname'];
 
 // ---------------------------------------------------------------------------
+// Admin session-signing key
+// ---------------------------------------------------------------------------
+// Each box signs its admin login cookies with its own random key, kept in
+// SESSION_KEY_FILE (root-only).  It is created on the box the first time this
+// server starts, so it is never in the source code (the key used to be a
+// fixed string here, letting anyone who read it forge an admin login) and
+// never shared between boxes: image preparation deletes the file, so every
+// box made from a release image creates its own on first boot.
+const SESSION_KEY_FILE = '/usr/local/connectbox/admin_session.key';
+
+/**
+ * Return this box's session-signing key, creating and saving a new random
+ * one if the file is missing or unusable.  If it cannot be saved, the new key
+ * is still used for this run (admins just sign in again after a restart).
+ */
+function loadSessionKey() {
+	const fs = require('fs');
+	try {
+		const key = fs.readFileSync(SESSION_KEY_FILE, 'utf8').trim();
+		if (key.length >= 32) {
+			return key;
+		}
+	}
+	catch (err) {
+		// No key yet - create one below
+	}
+	const key = require('crypto').randomBytes(32).toString('hex');
+	try {
+		fs.writeFileSync(SESSION_KEY_FILE, key + '\n', {mode: 0o600});
+		logger.log('info', `Created a new admin session key in ${SESSION_KEY_FILE}`);
+	}
+	catch (err) {
+		logger.log('error', `Could not save the admin session key (${err.message}); admins will need to sign in again after a restart`);
+	}
+	return key;
+}
+
+// ---------------------------------------------------------------------------
 // Server startup and middleware stack
 // ---------------------------------------------------------------------------
 console.log(`Listening on port ${configs.port}`);
@@ -46,8 +84,9 @@ app.use(bodyParser.json({ type: 'application/json', limit: '50mb' }));
 app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 app.use(bodyParser.text({ type: 'text/html' , limit: '50mb'}));
 app.use(cookieParser());
-// Cookie session with a fixed key — the session contains only username after login.
-app.use(cookieSession({name: 'connectbox',keys: ['81143184-d876-11eb-b8bc-0242ac130003'],maxAge: 24 * 60 * 60 * 1000}));
+// Cookie session — the session contains only the username after login, signed
+// with this box's own key (see loadSessionKey).
+app.use(cookieSession({name: 'connectbox',keys: [loadSessionKey()],maxAge: 24 * 60 * 60 * 1000}));
 
 // ---------------------------------------------------------------------------
 // Auth endpoints — registered before the auth guard so they are accessible
