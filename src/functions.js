@@ -252,7 +252,7 @@ get.hostname = function (){
 set.hostname = function (json){
 	fs.writeFileSync('/etc/hostname',`${json.value}`);  // set hostname
 	setBrand({value:`Brand=${json.value}`}); // set in brands.txt
-	execute(`sudo sed -i -e "/server_name / s/server_name .*/server_name ${json.value} thewell connectbox;/" /etc/nginx/sites-enabled/connectbox_enhanced.conf`)
+	execute(`sudo sed -i -e "/server_name / s/server_name .*/server_name ${json.value} .local connectbox;/" /etc/nginx/sites-enabled/connectbox_enhanced.conf`)
 	// The http://  value must be handled with \\\/\\\/ because it has to double escape the slashes due to regexp
 	execute('nginx -s reload') // Restart nginx now
 	return (true)

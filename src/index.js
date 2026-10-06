@@ -47,7 +47,7 @@ app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 app.use(bodyParser.text({ type: 'text/html' , limit: '50mb'}));
 app.use(cookieParser());
 // Cookie session with a fixed key — the session contains only username after login.
-app.use(cookieSession({name: 'relaytrust',keys: ['81143184-d876-11eb-b8bc-0242ac130003'],maxAge: 24 * 60 * 60 * 1000}));
+app.use(cookieSession({name: 'connectbox',keys: ['81143184-d876-11eb-b8bc-0242ac130003'],maxAge: 24 * 60 * 60 * 1000}));
 
 // ---------------------------------------------------------------------------
 // Auth endpoints — registered before the auth guard so they are accessible
