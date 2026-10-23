@@ -19,7 +19,7 @@
     "cookie-session": "*",
     "cors": "*",
     "emojione": "^4.5.0",
-    "express": "*",
+    "express": "^4",
     "express-session": "*",
     "file-type": "16.4.0",
     "logger": "*",
