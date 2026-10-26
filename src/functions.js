@@ -63,8 +63,24 @@ function auth (password) {
 
 //DICT:SET:password (string): Set Web Access password
 set.password = function (json){
-	var hash = execute(`echo ${json.value} | openssl passwd -apr1 -salt CBOX2018 -stdin`)
-	fs.writeFileSync('/usr/local/connectbox/etc/basicauth',`admin:${hash.toString()}`);
+	// Hash exactly what was typed: the password goes to openssl on its standard
+	// input, never through a shell (it used to be "echo ${json.value} | ...",
+	// which ran anything in the password as a command and changed some
+	// passwords before hashing them).  Must match auth() in index.js.
+	var pw = json ? json.value : undefined;
+	if (typeof pw !== 'string' || pw === '' || /[\r\n\0]/.test(pw)) {
+		return {status: 400, message: 'Password must not be empty or contain line breaks'};
+	}
+	try {
+		var hash = require('child_process').execFileSync('openssl',
+			['passwd', '-apr1', '-salt', 'CBOX2018', '-stdin'], {input: pw + '\n'}).toString().trim();
+		if (!hash.startsWith('$apr1$')) throw new Error('unexpected openssl output');
+		require('fs').writeFileSync('/usr/local/connectbox/etc/basicauth', `admin:${hash}`);
+	}
+	catch (e) {
+		console.log(`ERROR: set.password: ${e.message}`);
+		return {status: 500, message: 'Could not set the password'};
+	}
 	return (true);
 }
 
@@ -546,11 +562,14 @@ function setBrand(body) {
 		}
 		// lcd_pages_stats is a virtual rollup key — fan the value out to every
 		// individual lcd_pages_stats_* key rather than storing the alias itself.
+		// Store the parsed value (1 / 0), not the raw string: the display
+		// service treats only a number 0 (or "0") as "page off".
 		if (key === 'lcd_pages_stats') {
+			var pageval = brand[key];  // parsed above
 			delete brand[key];  // Don't keep lcd_pages_stats
 			for (var pagekey of Object.keys(brand)) {
 				if (pagekey.startsWith(key)) {
-					brand[pagekey] = val; // Example: lcd_pages_stats_hour_one = 1
+					brand[pagekey] = pageval; // Example: lcd_pages_stats_hour_one = 1
 				}
 			}
 		}

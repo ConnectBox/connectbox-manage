@@ -23,7 +23,7 @@ const express = require('express'),
 	cookieSession = require('cookie-session'),
     nocache = require('nocache'),
     cors = require('cors'),
-   	{execSync}= require("child_process"),
+   	{execSync, execFileSync}= require("child_process"),
 	moment = require('moment-timezone'),
     configs = require('./configs.js'),
 	functions = require('./functions.js');
@@ -86,7 +86,16 @@ app.use(bodyParser.text({ type: 'text/html' , limit: '50mb'}));
 app.use(cookieParser());
 // Cookie session — the session contains only the username after login, signed
 // with this box's own key (see loadSessionKey).
-app.use(cookieSession({name: 'connectbox',keys: [loadSessionKey()],maxAge: 24 * 60 * 60 * 1000}));
+//
+// An admin login must not outlive its use (in some countries a phone found
+// still signed in to the box is dangerous).  The session ends when the admin
+// page is left (the page calls /admin/api/logout), and in any case after
+// ADMIN_IDLE_MS without an admin request: the cookie expires then, and the box
+// also refuses a session whose last request is older than that, whatever the
+// browser sends.  While the admin page is open it calls /admin/api/keepalive
+// once a minute.
+const ADMIN_IDLE_MS = 5 * 60 * 1000;
+app.use(cookieSession({name: 'connectbox',keys: [loadSessionKey()],maxAge: ADMIN_IDLE_MS}));
 
 // ---------------------------------------------------------------------------
 // Auth endpoints — registered before the auth guard so they are accessible
@@ -105,6 +114,7 @@ app.put('/admin/api/auth', function(req,res) {
 	if (req.body && req.body.password && auth(req.body.password)) {
 		logger.log('debug', `${req.method} ${req.originalUrl}: Authorized`);
 		req.session.username = "admin";
+		req.session.seen = Date.now();
 		response = {username:"admin"};
 		res.send(response)
 	}
@@ -120,11 +130,14 @@ app.put('/admin/api/auth', function(req,res) {
  * Setting req.session to null invalidates the cookie-session so the next
  * request from this browser will fail the auth guard.
  */
-app.get('/admin/api/logout', function(req,res) {
+function logout(req,res) {
 	logger.log('debug', `${req.method} ${req.originalUrl}: Logged Out`);
 	req.session = null;
 	res.sendStatus(200);
-})
+}
+app.get('/admin/api/logout', logout);
+// POST: sent by navigator.sendBeacon when the admin page is left
+app.post('/admin/api/logout', logout);
 
 /**
  * Return whether Moodle LMS is installed on this device.
@@ -294,9 +307,24 @@ app.use(async function (req, res, next) {
 	else if (!req.session.username) {
 		res.sendStatus(401);
 	}
+	else if (!req.session.seen || Date.now() - req.session.seen > ADMIN_IDLE_MS) {
+		// Idle too long (or a cookie from before the idle limit): sign out
+		logger.log('debug', `${req.method} ${req.originalUrl}: admin session expired`);
+		req.session = null;
+		res.sendStatus(401);
+	}
 	else {
+		req.session.seen = Date.now();	// also renews the cookie's expiry
 		next();
 	}
+});
+
+/**
+ * Keep the admin session alive while the admin page is open (called once a
+ * minute by the page; the auth guard above renews the session).
+ */
+app.get('/admin/api/keepalive', function(req,res) {
+	res.send({code: 0, result: ['ok']});
 });
 
 // Delegate the full admin API surface to the routes module.
@@ -314,17 +342,22 @@ app.use('/admin/api', require('./routes/api.js'));
  */
 function auth(password) {
 	try {
-		var authString = fs.readFileSync('/usr/local/connectbox/etc/basicauth','utf-8');
-		var checkPassword = execSync(`echo ${password} | openssl passwd -apr1 -salt CBOX2018 -stdin`).toString().replace('\n','');
-		if ('admin:' + checkPassword === authString) {
-			return true;
-		}
-		else {
+		// The password goes to openssl on its standard input, never through a
+		// shell (it used to be "echo ${password} | openssl ..." - anyone on the
+		// Wi-Fi could run commands as root from the login form).  openssl -stdin
+		// reads one line, so a password with a line break is refused (otherwise
+		// only its first line would be checked).
+		if (typeof password !== 'string' || password === '' || /[\r\n\0]/.test(password)) {
 			return false;
 		}
+		var authString = require('fs').readFileSync('/usr/local/connectbox/etc/basicauth','utf-8').trim();
+		var checkPassword = execFileSync('openssl', ['passwd', '-apr1', '-salt', 'CBOX2018', '-stdin'],
+			{input: password + '\n'}).toString().trim();
+		var a = Buffer.from('admin:' + checkPassword), b = Buffer.from(authString);
+		return a.length === b.length && require('crypto').timingSafeEqual(a, b);
 	}
 	catch(e) {
-		console.log(`ERROR: auth: ${e}`);
+		console.log(`ERROR: auth: ${e.message}`);
 		return false;
 	}
 }
