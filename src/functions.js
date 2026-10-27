@@ -573,7 +573,13 @@ function setBrand(body) {
 				}
 			}
 		}
-		fs.writeFileSync('/usr/local/connectbox/brand.j2',JSON.stringify(brand));
+		// Whole file to a temporary name, then renamed into place, so the hat
+		// service and PxUSBm never read brand.j2 half written (the hat
+		// service crashed reading an empty brand.j2).  Keeps owner and mode.
+		var brandPath = '/usr/local/connectbox/brand.j2', tmpPath = brandPath + '.tmp.' + process.pid;
+		fs.writeFileSync(tmpPath, JSON.stringify(brand));
+		try { var st = fs.statSync(brandPath); fs.chmodSync(tmpPath, st.mode & 0o7777); fs.chownSync(tmpPath, st.uid, st.gid); } catch (e) {}
+		fs.renameSync(tmpPath, brandPath);
 	}
 	return(body.value);
 }
