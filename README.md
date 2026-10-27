@@ -15,6 +15,17 @@ signs everyone out. connectbox-pi's image preparation deletes it, so boxes made 
 image each create their own. Never put a fixed key in the source: anyone who knows it can forge
 an admin sign-in.
 
+A sign-in does not last: the session ends after 5 minutes without an admin request
+(`ADMIN_IDLE_MS`, also the cookie's lifetime) and when the admin page calls
+`/admin/api/logout` (GET or POST - the page sends it when it is left). The admin page calls
+`GET /admin/api/keepalive` once a minute while it is open. Do not add a long-lived admin
+cookie: a phone left signed in as admin can be dangerous in some countries.
+
+The password is checked by running `openssl passwd -apr1` with the password on its standard
+input (`execFileSync`, no shell) and a constant-time compare; empty passwords and passwords
+with line breaks are refused. `set.password` hashes the same way. Never build a shell command
+from the password.
+
 # Installation and Development
 Connectbox-pi Ansible will install this application but should you want to install on another machine or for development:
 * git clone the repo to your machine.
