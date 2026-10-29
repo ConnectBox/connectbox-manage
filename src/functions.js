@@ -563,12 +563,10 @@ set.wipe = function(json) {
 set.securitykey = function(json) {
 	var key = json ? json.value : undefined;
 	if (badText(key)) return refused('Key must not contain line breaks');
+	// Only saves the key.  (It also used to run "wget -O /tmp/download.mbz
+	// <key>", a copy-paste slip from coursedownload: the key was looked up as a
+	// host name, nothing was downloaded, and /tmp/download.mbz was emptied.)
 	setBrand({value:'server_authorization='+key});
-	// (Kept as it was, without a shell: this runs wget with the key as the
-	// address, which looks like a copy-paste slip - see the 2026-10-28 notes.)
-	if (!key.startsWith('-')) {
-		runInBackground('sudo', ['wget', '-O', '/tmp/download.mbz', key], '/tmp/course-download.log');
-	}
 }
 
 //DICT:GET:logsources: Returns an array of logs that can be viewed
@@ -631,8 +629,11 @@ function getBrand(key) {
  */
 function setBrand(body) {
 	brand = JSON.parse(fs.readFileSync('/usr/local/connectbox/brand.j2'));
-	var key = body.value.split('=')[0];
-	var val = body.value.split('=')[1];
+	// Key before the first "=", value is everything after it (a value may
+	// itself contain "=", e.g. a key ending in "==")
+	var eq = body.value.indexOf('=');
+	var key = eq < 0 ? body.value : body.value.slice(0, eq);
+	var val = eq < 0 ? undefined : body.value.slice(eq + 1);
 	// Case-insensitive key lookup — find the actual stored key name.
 	for (var brandKey of Object.keys(brand)) {
 		if (key === 'lcd_pages_stats') {
@@ -648,12 +649,10 @@ function setBrand(body) {
 		brand[key] = val;
 	}
 	else if (key) {
-		// Try to store as integer; fall back to string if parseInt returns NaN.
+		// Store whole numbers (e.g. "1", "27") as numbers, anything else as
+		// text.  (parseInt alone turned a key like "405b2056-..." into 405.)
 		try {
-			brand[key] = parseInt(val);
-			if (isNaN(brand[key])) {
-				brand[key] = val;
-			}
+			brand[key] = /^-?[0-9]+$/.test(String(val).trim()) ? parseInt(val, 10) : val;
 		}
 		catch {
 			brand[key] = val;
@@ -671,9 +670,12 @@ function setBrand(body) {
 				}
 			}
 		}
+	}
+	if (key) {
 		// Whole file to a temporary name, then renamed into place, so the hat
 		// service and PxUSBm never read brand.j2 half written (the hat
 		// service crashed reading an empty brand.j2).  Keeps owner and mode.
+		// (Also for server_siteadmin_phone, which was set but never saved.)
 		var brandPath = '/usr/local/connectbox/brand.j2', tmpPath = brandPath + '.tmp.' + process.pid;
 		fs.writeFileSync(tmpPath, JSON.stringify(brand));
 		try { var st = fs.statSync(brandPath); fs.chmodSync(tmpPath, st.mode & 0o7777); fs.chownSync(tmpPath, st.uid, st.gid); } catch (e) {}
