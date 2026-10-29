@@ -225,25 +225,40 @@ get.clientwifiscan = function (){
 
 //DICT:GET:clientssid: Client Wi-Fi SSID
 get.clientssid = function (){
-	return (execute(`grep 'ssid' /etc/wpa_supplicant/wpa_supplicant.conf | cut -d'"' -f2`))
+	// The first line that starts with "ssid=" (not "scan_ssid=...")
+	return (execute(`grep -m1 -E '^[[:space:]]*ssid=' /etc/wpa_supplicant/wpa_supplicant.conf | cut -d'"' -f2`))
 }
 //DICT:SET:clientssid (string): Client Wi-Fi SSID
 set.clientssid = function (json){
 	var v = json ? json.value : undefined;
 	if (badText(v) || v.includes('"') || Buffer.byteLength(v) > 32) return refused('SSID must be at most 32 bytes, without quotes or line breaks');
-	// (every line containing "ssid=" - as the sed command did)
-	return setAfterEquals('/etc/wpa_supplicant/wpa_supplicant.conf', function (l) { return l.includes('ssid='); }, '"' + v + '"');
+	// Only the first line that starts with "ssid=" (the first network block).
+	// It used to be every line containing "ssid=", which also turned a
+	// hand-added "scan_ssid=1" into scan_ssid="name" (wpa_supplicant then
+	// rejects the file) and renamed every other network block too.
+	var first = true;
+	return setAfterEquals('/etc/wpa_supplicant/wpa_supplicant.conf', function (l) {
+		if (first && /^\s*ssid=/.test(l)) { first = false; return true; }
+		return false;
+	}, '"' + v + '"');
 }
 
 //DICT:GET:clientpassphrase: Client Wi-Fi WPA Passphrase
 get.clientpassphrase = function (){
-	return (execute(`grep 'psk' /etc/wpa_supplicant/wpa_supplicant.conf | cut -d'"' -f2`))
+	// The first line that starts with "psk=" (same network block as clientssid)
+	return (execute(`grep -m1 -E '^[[:space:]]*psk=' /etc/wpa_supplicant/wpa_supplicant.conf | cut -d'"' -f2`))
 }
 //DICT:SET:clientpassphrase (string): Client Wi-Fi WPA Passphrase
 set.clientpassphrase = function (json){
 	var v = json ? json.value : undefined;
 	if (badText(v) || v.includes('"')) return refused('Passphrase must not contain quotes or line breaks');
-	return setAfterEquals('/etc/wpa_supplicant/wpa_supplicant.conf', function (l) { return l.includes('psk='); }, '"' + v + '"');
+	// Only the first line that starts with "psk=", the same (first) network
+	// block that set.clientssid changes, so a name and its passphrase stay together.
+	var first = true;
+	return setAfterEquals('/etc/wpa_supplicant/wpa_supplicant.conf', function (l) {
+		if (first && /^\s*psk=/.test(l)) { first = false; return true; }
+		return false;
+	}, '"' + v + '"');
 }
 
 //DICT:GET:clientcountry: Client Wi-Fi Wi-Fi Country Support
@@ -337,7 +352,9 @@ set.hostname = function (json){
 
 //DICT:GET:isconnected: Returns true if box has ping to Google
 get.isconnected = function() {
-	var response = execute ("curl --connect-timeout 2 -sI google.com |head -n 1|cut -d$' ' -f2 ") || false;
+	// cut -d' ' (as at the top of this file): the old cut -d$' ' is bash-only, so
+	// under /bin/sh it always failed and the error text counted as "connected".
+	var response = execute ("curl --connect-timeout 2 -sI google.com |head -n 1|cut -d' ' -f2 ") || false;
 	if (response) {
 		return (true);
 	}
