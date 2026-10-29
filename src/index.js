@@ -110,7 +110,8 @@ app.use(cookieSession({name: 'connectbox',keys: [loadSessionKey()],maxAge: ADMIN
  * so subsequent requests pass the auth guard middleware.
  */
 app.put('/admin/api/auth', function(req,res) {
-	console.log(req.body);
+	// (The request body - the typed password - is not logged: it used to be,
+	// so admin passwords ended up in the pm2 logs.)
 	if (req.body && req.body.password && auth(req.body.password)) {
 		logger.log('debug', `${req.method} ${req.originalUrl}: Authorized`);
 		req.session.username = "admin";
@@ -155,8 +156,9 @@ app.get('/admin/api/ismoodle', function(req,res) {
  *
  * Fetches all weblog entries via functions.get.weblog(), formats each row
  * with a human-readable date, and emits them as quoted CSV with a header row.
- * The browser's Content-Disposition header (set implicitly by res.type) causes
- * the browser to download the response as a file.
+ * It is sent with Content-Disposition: attachment, so the browser saves it as a
+ * file instead of showing it (iOS Safari showed it in place, which left the
+ * admin page and so ended the admin session).
  */
 app.get('/admin/api/downloadweblog', function(req,res) {
 	logger.log('debug', `${req.method} ${req.originalUrl}`);
@@ -175,12 +177,13 @@ app.get('/admin/api/downloadweblog', function(req,res) {
 		}
 		data.push(fitem);
 	}
-	// Quote every field so commas inside values don't break CSV parsers.
+	// Quote every field so commas inside values don't break CSV parsers, and
+	// double any quote inside a value (CSV's escape).
 	var rows = [];
 	for (var item of data) {
-		rows.push('"' + item.join('","') + '"');
+		rows.push(item.map(function (v) { return '"' + String(v).replace(/"/g, '""') + '"'; }).join(','));
 	}
-	res.type('text/csv');
+	res.attachment('connectbox-access-log.csv');   // also sets Content-Type text/csv
 	res.send (rows.join('\n'))
 });
 

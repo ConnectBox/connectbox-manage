@@ -2,6 +2,5 @@
 .env
 uploads/
 node_modules/
-package-lock.json
-package-lock.json
-package-lock.json
+# package-lock.json is committed (2026-10-28): it pins every package, including
+# the dependencies of dependencies, to the set tested with the boxes' Node 16.

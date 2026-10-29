@@ -17,7 +17,7 @@
 const
   configs = require('./configs.js'),
 	{execSync}= require("child_process"),
-	{ exec } = require('child_process'),
+	{ exec, execFile, spawn } = require('child_process'),
 	fs = require('fs'),
 	moment = require('moment'),
 	request = require('request'),
@@ -40,7 +40,7 @@ var doCommand = {};
 
 // Probe internet connectivity once at startup.  Used by get.subscriptions()
 // to short-circuit before attempting a remote curl call.
-var isConnected = execute ("curl --connect-timeout 2 -sI google.com |head -n 1|cut -d$' ' -f2 ") || false;
+var isConnected = execute ("curl --connect-timeout 2 -sI google.com |head -n 1|cut -d' ' -f2 ") || false;
 
 // Shell commands for each named log source.  Keys are the valid values for
 // GET /admin/api/logs/:log.
@@ -50,6 +50,41 @@ var logSources = {
 	"webserver": 'cat /var/log/connectbox/connectbox-access.log',
 	"loadContent": 'cat /tmp/loadContent.log',
 	"sync": 'cat /tmp/push_messages.log'
+}
+
+// ── Safe setting changes ─────────────────────────────────────────────────────
+// The setters below used to build shell commands from the typed value
+// (sudo sed -i ... ${json.value} ...), so a value containing ; $( ) ` or a
+// quote ran commands as root, and one containing / & or \ broke the sed
+// command.  They now edit the files in Node and run programs without a shell;
+// for ordinary values the files end up exactly as the old sed commands left
+// them.  connectbox-manage runs as root (pm2), so no sudo is needed to write.
+
+/** A typed value we refuse: not text, or holding a line break or NUL. */
+function badText(v) {
+	return typeof v !== 'string' || /[\r\n\0]/.test(v);
+}
+
+/**
+ * Rewrite the lines of a file for which test(line) is true, the way the old
+ * sed commands ("s" from the first "=" to the end of the line) did: everything
+ * from the first "=" on the line to its end becomes "=" + rest.  The file is rewritten in place (same
+ * owner and permissions).  Returns '' (what the sed commands returned).
+ */
+function setAfterEquals(file, test, rest) {
+	var lines = fs.readFileSync(file, 'utf8').split('\n');
+	var out = lines.map(function (line) {
+		if (!test(line)) return line;
+		var i = line.indexOf('=');
+		return i < 0 ? line : line.slice(0, i) + '=' + rest;
+	});
+	fs.writeFileSync(file, out.join('\n'));
+	return '';
+}
+
+/** Error result for a refused value (routes/api.js sends it as that HTTP status). */
+function refused(what) {
+	return {status: 400, message: what};
 }
 
 /**
@@ -100,7 +135,9 @@ get.apssid = function (){
 }
 //DICT:SET:apssid (string): Access Point SSID
 set.apssid = function (json){
-	return (execute(`sudo sed -i -e "/^ssid=/ s/=.*/=${json.value}/" /etc/hostapd/hostapd.conf`))
+	var v = json ? json.value : undefined;
+	if (badText(v) || v === '' || Buffer.byteLength(v) > 32) return refused('SSID must be 1-32 bytes, without line breaks');
+	return setAfterEquals('/etc/hostapd/hostapd.conf', function (l) { return /^ssid=/.test(l); }, v);
 }
 
 //DICT:GET:appassphrase: Access Point WPA passphrase
@@ -109,20 +146,27 @@ get.appassphrase = function (){
 }
 //DICT:SET:appassphrase (string): Access Point WPA passphrase
 set.appassphrase = function (json){
-	if (json.value.length >= 8) {
-		// Check to see if the line is in hostapd.conf before writing
-		if (execute(`cat /etc/hostapd/hostapd.conf |grep wpa_passphrase= |wc -l`) == 0) {
-			// Write new value (previous state was no WPA)
-			return(execute(`echo 'wpa_passphrase=${json.value}' | sudo tee -a /etc/hostapd/hostapd.conf >/dev/null`));
+	var v = json ? json.value : undefined;
+	if (badText(v)) return refused('Passphrase must not contain line breaks');
+	var conf = '/etc/hostapd/hostapd.conf';
+	var has = function (l) { return l.includes('wpa_passphrase='); };
+	if (v.length >= 8) {
+		if (v.length > 63) return refused('Passphrase must be 8-63 characters');
+		if (!fs.readFileSync(conf, 'utf8').split('\n').some(has)) {
+			// No passphrase yet (open network): add one, as "echo ... | tee -a" did
+			fs.appendFileSync(conf, 'wpa_passphrase=' + v + '\n');
+			return '';
 		}
-		else {
-			// Modify existing passphrase
-			return (execute(`sudo sed -i -e "/wpa_passphrase=/ s/=.*/=\"${json.value}\"/" /etc/hostapd/hostapd.conf`))
-		}
+		// Modify existing passphrase
+		return setAfterEquals(conf, has, v);
 	}
 	else {
-		// Remove existing passphrase
-		return (execute(`sudo sed -i -e "/wpa_passphrase=/ s/wpa_passphrase=.*//" /etc/hostapd/hostapd.conf`))
+		// Remove existing passphrase (the line is emptied, as the sed command did)
+		var lines = fs.readFileSync(conf, 'utf8').split('\n');
+		fs.writeFileSync(conf, lines.map(function (l) {
+			return has(l) ? l.replace(/wpa_passphrase=.*/, '') : l;
+		}).join('\n'));
+		return '';
 	}
 }
 
@@ -132,7 +176,9 @@ get.apchannel = function (){
 }
 //DICT:SET:apchannel (integer): Access Point Wi-Fi Channel
 set.apchannel = function (json){
-	return (execute(`sudo sed -i -e "/channel=/ s/=.*/=\"${json.value}\"/" /etc/hostapd/hostapd.conf`))
+	var v = json ? String(json.value) : '';
+	if (!/^[0-9]{1,3}$/.test(v)) return refused('Channel must be a number');
+	return setAfterEquals('/etc/hostapd/hostapd.conf', function (l) { return l.includes('channel='); }, v);
 }
 
 //DICT:GET:clientwifiscan: Scan for Available Networks
@@ -183,7 +229,10 @@ get.clientssid = function (){
 }
 //DICT:SET:clientssid (string): Client Wi-Fi SSID
 set.clientssid = function (json){
-	return (execute(`sudo sed -i -e "/ssid=/ s/=.*/=\\\"${json.value}\\\"/" /etc/wpa_supplicant/wpa_supplicant.conf`))
+	var v = json ? json.value : undefined;
+	if (badText(v) || v.includes('"') || Buffer.byteLength(v) > 32) return refused('SSID must be at most 32 bytes, without quotes or line breaks');
+	// (every line containing "ssid=" - as the sed command did)
+	return setAfterEquals('/etc/wpa_supplicant/wpa_supplicant.conf', function (l) { return l.includes('ssid='); }, '"' + v + '"');
 }
 
 //DICT:GET:clientpassphrase: Client Wi-Fi WPA Passphrase
@@ -192,7 +241,9 @@ get.clientpassphrase = function (){
 }
 //DICT:SET:clientpassphrase (string): Client Wi-Fi WPA Passphrase
 set.clientpassphrase = function (json){
-	return (execute(`sudo sed -i -e "/psk=/ s/=.*/=\\\"${json.value}\\\"/" /etc/wpa_supplicant/wpa_supplicant.conf`))
+	var v = json ? json.value : undefined;
+	if (badText(v) || v.includes('"')) return refused('Passphrase must not contain quotes or line breaks');
+	return setAfterEquals('/etc/wpa_supplicant/wpa_supplicant.conf', function (l) { return l.includes('psk='); }, '"' + v + '"');
 }
 
 //DICT:GET:clientcountry: Client Wi-Fi Wi-Fi Country Support
@@ -201,9 +252,11 @@ get.clientcountry = function (){
 }
 //DICT:SET:clientcountry(2 letter country code): Client Wi-Fi Wi-Fi Country Support
 set.clientcountry = function (json){
-	if (json.value == "") { json.value = "US"}
-	execute(`sudo sed -i -e "/country_code=/ s/=.*/=${json.value}/" /etc/hostapd/hostapd.conf`)
-	return (execute(`sudo sed -i -e "/country=/ s/=.*/=\"${json.value}\"/" /etc/wpa_supplicant/wpa_supplicant.conf`))
+	var v = json ? json.value : undefined;
+	if (v === "" || v === undefined) { v = "US"}
+	if (typeof v !== 'string' || !/^[A-Za-z]{2}$/.test(v)) return refused('Country must be a 2-letter code');
+	setAfterEquals('/etc/hostapd/hostapd.conf', function (l) { return l.includes('country_code='); }, v);
+	return setAfterEquals('/etc/wpa_supplicant/wpa_supplicant.conf', function (l) { return l.includes('country='); }, v);
 }
 
 //DICT:GET:connectedclients: Count of devices connected to access point
@@ -266,10 +319,18 @@ get.hostname = function (){
 }
 //DICT:SET:hostname: Box Hostname
 set.hostname = function (json){
-	fs.writeFileSync('/etc/hostname',`${json.value}`);  // set hostname
-	setBrand({value:`Brand=${json.value}`}); // set in brands.txt
-	execute(`sudo sed -i -e "/server_name / s/server_name .*/server_name ${json.value} .local connectbox;/" /etc/nginx/sites-enabled/connectbox_enhanced.conf`)
-	// The http://  value must be handled with \\\/\\\/ because it has to double escape the slashes due to regexp
+	var v = json ? json.value : undefined;
+	// A host name (letters, digits, hyphens): it goes into /etc/hostname and nginx's server_name
+	if (typeof v !== 'string' || !/^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(v)) {
+		return refused('Host name must be letters, digits and hyphens (1-63, not starting or ending with a hyphen)');
+	}
+	fs.writeFileSync('/etc/hostname',`${v}`);  // set hostname
+	setBrand({value:`Brand=${v}`}); // set in brands.txt
+	var conf = '/etc/nginx/sites-enabled/connectbox_enhanced.conf';
+	var lines = fs.readFileSync(conf, 'utf8').split('\n');
+	fs.writeFileSync(conf, lines.map(function (l) {
+		return l.includes('server_name ') ? l.replace(/server_name .*/, 'server_name ' + v + ' .local connectbox;') : l;
+	}).join('\n'));
 	execute('nginx -s reload') // Restart nginx now
 	return (true)
 }
@@ -386,9 +447,12 @@ set.subscribe = function(json) {
 
 //DICT:SET:openwelldownload (URL): Download the file and install into OpenWell
 set.openwelldownload = function(json) {
+	var url = json ? json.value : undefined;
+	if (badText(url)) return refused('Download address must not contain line breaks');
 	set.subscribe({});  // Zero out the subscription
 	execute('sudo rm /tmp/loadContent.log >/dev/null 2>&1');
-	exec(`sudo /usr/local/connectbox/bin/lazyLoader.py ${json.value} >/tmp/loadContent.log 2>&1 &`);
+	// Started without a shell, in the background, output to /tmp/loadContent.log
+	runInBackground('sudo', ['/usr/local/connectbox/bin/lazyLoader.py', url], '/tmp/loadContent.log');
 	return ('Downloading content has begun.');
 }
 
@@ -424,7 +488,14 @@ doCommand.openwellusb = function() {
 
 //DICT:SET:coursedownload (URL): Download the Moodle course and install
 set.coursedownload = function(json) {
-	exec(`(sudo wget -nv -O /tmp/download.mbz -o /tmp/loadContent.log '${json.value}' && sudo -u www-data /usr/bin/php /var/www/moodle/admin/cli/restore_backup.php --file=/tmp/download.mbz --categoryid=1) &`)
+	var url = json ? json.value : undefined;
+	if (badText(url) || url.startsWith('-')) return refused('Download address must be a URL');
+	// wget then restore, without a shell (the URL used to be pasted into one)
+	execFile('sudo', ['wget', '-nv', '-O', '/tmp/download.mbz', '-o', '/tmp/loadContent.log', '--', url], function (err) {
+		if (err) return;
+		execFile('sudo', ['-u', 'www-data', '/usr/bin/php', '/var/www/moodle/admin/cli/restore_backup.php',
+			'--file=/tmp/download.mbz', '--categoryid=1'], function () {});
+	});
 	return (true)
 }
 
@@ -452,7 +523,11 @@ get.coursesonusb = function() {
 
 //DICT:SET:courseusb (filename): Trigger a loading of Moodle content from /USB/courses
 set.courseusb = function(json) {
-	exec(`sudo -u www-data php /var/www/moodle/admin/cli/restore_backup.php -f="/media/usb0/courses/${json.value}" -c=1 >/tmp/loadContent.log 2>&1`);
+	var name = json ? json.value : undefined;
+	// A file name in /media/usb0/courses (as listed by get.coursesonusb), nothing else
+	if (badText(name) || name === '' || name.includes('/') || name === '.' || name === '..') return refused('Course must be a file name in /USB/courses');
+	runInBackground('sudo', ['-u', 'www-data', 'php', '/var/www/moodle/admin/cli/restore_backup.php',
+		'-f=/media/usb0/courses/' + name, '-c=1'], '/tmp/loadContent.log');
 	return true;
 }
 
@@ -469,8 +544,14 @@ set.wipe = function(json) {
 
 //DICT:SET:securitykey (string): Update the Moodle and Phonehome security key for sync with Dashboard
 set.securitykey = function(json) {
-	setBrand({value:'server_authorization='+json.value});
-	execute(`sudo wget -O /tmp/download.mbz ${json.value} >/tmp/course-download.log 2>&1`);
+	var key = json ? json.value : undefined;
+	if (badText(key)) return refused('Key must not contain line breaks');
+	setBrand({value:'server_authorization='+key});
+	// (Kept as it was, without a shell: this runs wget with the key as the
+	// address, which looks like a copy-paste slip - see the 2026-10-28 notes.)
+	if (!key.startsWith('-')) {
+		runInBackground('sudo', ['wget', '-O', '/tmp/download.mbz', key], '/tmp/course-download.log');
+	}
 }
 
 //DICT:GET:logsources: Returns an array of logs that can be viewed
@@ -763,6 +844,22 @@ set.disable_stats = function (json){
  * @param {string} command - Shell command to execute via execSync.
  * @returns {string} stdout with trailing newline removed, or error message.
  */
+/**
+ * Start a program in the background without a shell, with its output (and
+ * errors) written to logFile, like "cmd >logFile 2>&1 &".
+ */
+function runInBackground(cmd, args, logFile) {
+	var fd = fs.openSync(logFile, 'w');
+	try {
+		var child = spawn(cmd, args, {detached: true, stdio: ['ignore', fd, fd]});
+		child.on('error', function (e) { logger.log('error', `${cmd}: ${e.message}`); });
+		child.unref();
+	}
+	finally {
+		fs.closeSync(fd);
+	}
+}
+
 function execute(command) {
 	var response = ''
 	try {
