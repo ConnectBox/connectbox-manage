@@ -684,6 +684,44 @@ function setBrand(body) {
 	return(body.value);
 }
 
+// Internet sharing data total (2026-11-05): PxUSBm adds what the sharing
+// firewall rules passed to /usr/local/connectbox/internet_usage.json (bytes,
+// kept across reboots).  Reset sets up/down to 0 and keeps PxUSBm's counter
+// values, so nothing already counted is counted again.
+var INTERNET_USAGE_FILE = '/usr/local/connectbox/internet_usage.json';
+
+//DICT:GET:internetusage: Data passed through internet sharing: {up, down, since} (bytes)
+get.internetusage = function (){
+	try {
+		var u = JSON.parse(fs.readFileSync(INTERNET_USAGE_FILE, 'utf8'));
+		return ({up: Number(u.up) || 0, down: Number(u.down) || 0, since: String(u.since || '')});
+	}
+	catch (e) {
+		return ({up: 0, down: 0, since: ''});
+	}
+}
+
+//DICT:DO:internetusagereset: Set the internet sharing data total back to 0
+doCommand.internetusagereset = function (){
+	var u = {};
+	try { u = JSON.parse(fs.readFileSync(INTERNET_USAGE_FILE, 'utf8')); } catch (e) { u = {}; }
+	if (typeof u !== 'object' || u === null || Array.isArray(u)) u = {};
+	var d = new Date(), z = function (n) { return (n < 10 ? '0' : '') + n; };
+	u.up = 0;
+	u.down = 0;
+	u.since = `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}`;
+	try {
+		var tmp = INTERNET_USAGE_FILE + '.tmp.' + process.pid;
+		fs.writeFileSync(tmp, JSON.stringify(u, null, 1) + '\n', {mode: 0o644});
+		fs.renameSync(tmp, INTERNET_USAGE_FILE);
+	}
+	catch (e) {
+		logger.log('error', `internetusagereset: ${e.message}`);
+		return (false);
+	}
+	return (true);
+}
+
 //DICT:DO:clientwifiwipe: Forget the client Wi-Fi: SSID and password back to the build defaults, remembered networks removed
 doCommand.clientwifiwipe = function (){
 	// (2026-11-05, Kirk) The admin network (the first network={} block) gets
