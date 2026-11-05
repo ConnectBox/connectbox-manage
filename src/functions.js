@@ -684,6 +684,52 @@ function setBrand(body) {
 	return(body.value);
 }
 
+//DICT:DO:clientwifiwipe: Forget the client Wi-Fi: SSID and password back to the build defaults, remembered networks removed
+doCommand.clientwifiwipe = function (){
+	// (2026-11-05, Kirk) The admin network (the first network={} block) gets
+	// the playbook's defaults back (Default / Default1, group_vars/all), and
+	// PxUSBm's remembered networks are removed: its list file and everything
+	// from its marker line to the end of wpa_supplicant.conf.  Then the client
+	// interface is restarted, so wpa_supplicant forgets the old network.
+	// PxUSBm re-reads its list just before it writes wpa_supplicant.conf, and
+	// does not learn a network from a file changed after wpa_supplicant read it.
+	var conf = '/etc/wpa_supplicant/wpa_supplicant.conf';
+	try {
+		fs.rmSync('/etc/wpa_supplicant/connectbox_known_wifi.json', {force: true});
+		var text = fs.readFileSync(conf, 'utf8');
+		var i = text.indexOf('\n# Remembered by PxUSBm');
+		if (i >= 0) {
+			text = text.slice(0, i).replace(/\n+$/, '') + '\n';
+			fs.writeFileSync(conf, text);
+		}
+		var firstSsid = true, firstPsk = true;
+		setAfterEquals(conf, function (l) {
+			if (firstSsid && /^\s*ssid=/.test(l)) { firstSsid = false; return true; }
+			return false;
+		}, '"Default"');
+		setAfterEquals(conf, function (l) {
+			if (firstPsk && /^\s*psk=/.test(l)) { firstPsk = false; return true; }
+			return false;
+		}, '"Default1"');
+	}
+	catch (e) {
+		logger.log('error', `clientwifiwipe: ${e.message}`);
+		return (false);
+	}
+	var client = 'wlan0';
+	if (fs.existsSync('/usr/local/connectbox/wificonf.txt')) {
+		var m = fs.readFileSync('/usr/local/connectbox/wificonf.txt', 'utf8').match(/^ClientIF=(wlan\d+)\s*$/m);
+		client = m ? m[1] : '';
+	}
+	if (client) {
+		// In the background: ifup waits for DHCP, which will not answer now.
+		var child = spawn('sh', ['-c', `ifdown ${client}; sleep 1; ifup ${client}`], {detached: true, stdio: 'ignore'});
+		child.on('error', function (e) { logger.log('error', `clientwifiwipe restart: ${e.message}`); });
+		child.unref();
+	}
+	return (true);
+}
+
 //DICT:DO:deleteweblog: Clear all Content Viewing Logs
 doCommand.deleteweblog = function (){
 	execute("sudo rm -rf /var/log/connectbox/connectbox_enhanced*");
