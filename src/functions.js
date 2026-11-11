@@ -328,6 +328,57 @@ get.wifistatus = function (){
 	return (response);
 }
 
+/**
+ * Return /etc/hosts text with the box's own name changed to a new host name.
+ *
+ * Every host entry equal to one of the old names (any case), or ending in
+ * ".<old name>" (e.g. learn.Connectbox), gets the new name; the 127.0.1.1
+ * line (Debian's line for the machine's own name) is set to the new name, or
+ * added when there is none.  Comments, blank lines and all other entries
+ * (localhost, IPv6 names...) are kept as they are.
+ * @param {string} text - Current /etc/hosts.
+ * @param {string[]} oldNames - Names the box has had (saved and running).
+ * @param {string} name - New host name (already checked).
+ * @returns {string}
+ */
+function hostsWithName(text, oldNames, name) {
+	// "localhost" is never treated as the box's own name (a box whose name was
+	//  never set reports it), or the localhost entries would be renamed
+	var olds = (oldNames || []).filter(Boolean).map(function (o) { return String(o).toLowerCase(); })
+		.filter(function (o) { return o !== 'localhost'; });
+	var seenOwn = false;
+	// One line at a time: "<address> <name> <name>... [# comment]"
+	var lines = String(text).split('\n').map(function (line) {
+		var m = /^(\s*)(\S+)(\s+)([^#]*?)(\s*)(#.*)?$/.exec(line);
+		if (!m || m[2].charAt(0) === '#' || !m[4]) {
+			return line;	// blank line, comment, or an address without names
+		}
+		var names = m[4].split(/\s+/);
+		if (m[2] === '127.0.1.1') {
+			seenOwn = true;
+			names = [name];
+		}
+		else {
+			names = names.map(function (n) {
+				var low = n.toLowerCase();
+				for (var i = 0; i < olds.length; i++) {
+					if (low === olds[i]) { return name; }
+					if (low.endsWith('.' + olds[i])) { return n.slice(0, n.length - olds[i].length) + name; }
+				}
+				return n;
+			});
+		}
+		return m[1] + m[2] + m[3] + names.join(' ') + m[5] + (m[6] || '');
+	});
+	if (!seenOwn) {
+		// Keep the file's final newline after the added line
+		var end = lines.length && lines[lines.length - 1] === '' ? lines.pop() : null;
+		lines.push('127.0.1.1\t' + name);
+		if (end !== null) { lines.push(end); }
+	}
+	return lines.join('\n');
+}
+
 //DICT:GET:hostname: Box Hostname
 get.hostname = function (){
 	return (execute(`cat /etc/hostname`))
@@ -339,7 +390,27 @@ set.hostname = function (json){
 	if (typeof v !== 'string' || !/^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(v)) {
 		return refused('Host name must be letters, digits and hyphens (1-63, not starting or ending with a hyphen)');
 	}
-	fs.writeFileSync('/etc/hostname',`${v}`);  // set hostname
+	// The names the box has now: the saved one and the running one (they differ
+	//  when an earlier change wrote /etc/hostname without applying it)
+	var oldNames = [];
+	try { oldNames.push(fs.readFileSync('/etc/hostname', 'utf8').trim()); } catch (e) {}
+	oldNames.push(require('os').hostname());
+	fs.writeFileSync('/etc/hostname',`${v}\n`);  // the name used at the next boot
+	// Apply it to the running system too.  Before 2026-11-11 only the file was
+	//  written, so the box kept its old name until a reboot.  v passed the
+	//  check above and is given as an argument, not through a shell.
+	try { require('child_process').execFileSync('hostname', [v]); }
+	catch (e) { logger.log('error', `hostname ${v}: ${e.message}`); }
+	// /etc/hosts must know the new name, or sudo and other programs wait on a
+	//  failed lookup of the box's own name.  Written to a temporary file and renamed.
+	try {
+		var hosts = fs.readFileSync('/etc/hosts', 'utf8');
+		var st = fs.statSync('/etc/hosts');
+		var tmp = '/etc/hosts.tmp.' + process.pid;
+		fs.writeFileSync(tmp, hostsWithName(hosts, oldNames, v), {mode: st.mode & 0o7777});
+		fs.renameSync(tmp, '/etc/hosts');
+	}
+	catch (e) { logger.log('error', `/etc/hosts not updated for ${v}: ${e.message}`); }
 	setBrand({value:`Brand=${v}`}); // set in brands.txt
 	var conf = '/etc/nginx/sites-enabled/connectbox_enhanced.conf';
 	var lines = fs.readFileSync(conf, 'utf8').split('\n');
@@ -1043,6 +1114,7 @@ function sortArrayByTimestamp( a, b ) {
 }
 
 module.exports = {
+	hostsWithName,
 	auth,
 	brand,
 	get,

@@ -14,6 +14,7 @@ bash tests/run_all.sh
 | `test_setbrand.js` | setBrand number rule, `=` in values, phone kept as text, security key saved without wget. Uses the box's brand.j2 when there is one (writes intercepted), otherwise a sample. |
 | `bp_test.js` | body-parser json / form / text set up as in index.js; bad JSON gives 400 |
 | `test_hdmi.js` | HDMI screen control (`src/hdmi.js`, 2026-11-11): web paths checked (only video/audio/pictures in a language's media folder; `..`, other folders and `/etc/...` refused), media list skips dead links, playlist saved atomically with box paths, visitor play refused while `hdmi_visitor_play` is 0 but allowed for an admin, player reload after a playlist save. Temporary folders and a fake player socket. |
+| `test_hostname.js` | `hostsWithName` (2026-11-11): the /etc/hosts text written when the host name changes - own name and `learn.<name>` renamed in any case, 127.0.1.1 line set or added, localhost / IPv6 / comments kept, running twice changes nothing. Text only: `node test_hostname.js <functions.js>`. |
 
 Each takes the file or folder under test: `node test_clientwifi.js <functions.js>`,
 `node test_setbrand.js <functions.js>`, `node bp_test.js <connectbox-manage folder>`, `node test_hdmi.js <hdmi.js>`.

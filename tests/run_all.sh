@@ -11,5 +11,6 @@ run "test_clientwifi (client SSID / passphrase)" "$HERE/test_clientwifi.js" "$CB
 run "test_setbrand (setBrand values)"            "$HERE/test_setbrand.js" "$CBM/src/functions.js"
 run "bp_test (body-parser json/form/text)"       "$HERE/bp_test.js" "$CBM"
 run "test_hdmi (HDMI screen: paths, playlist, visitor switch)" "$HERE/test_hdmi.js" "$CBM/src/hdmi.js"
+run "test_hostname (/etc/hosts when the host name changes)" "$HERE/test_hostname.js" "$CBM/src/functions.js"
 rm -f /tmp/cbm_harness_out.txt
 [ $FAILED = 0 ] && echo "ALL PASSED" || echo "SOME TESTS FAILED"; exit $FAILED
