@@ -16,7 +16,8 @@
  *     GET  /admin/api/hdmi/media           -> playable files on the box
  *     GET  /admin/api/hdmi/playlist        -> {items, image_seconds}
  *     PUT  /admin/api/hdmi/playlist        {items: [path...], image_seconds}
- *     GET  /admin/api/hdmi/stop            -> stop a chosen item, back to the playlist
+ *     GET  /admin/api/hdmi/stop            -> stop a chosen item and the playlist; the
+ *          splash stays until the playlist is saved again (PUT playlist -> reload)
  *
  * Paths given by the app or the admin page are web paths
  * ("assets/content/<lang>/media/<file>") under the enhanced interface's root.
