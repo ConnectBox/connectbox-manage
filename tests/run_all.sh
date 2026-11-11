@@ -10,5 +10,6 @@ run() { local name=$1; shift; echo "== $name"; if node "$@" > /tmp/cbm_harness_o
 run "test_clientwifi (client SSID / passphrase)" "$HERE/test_clientwifi.js" "$CBM/src/functions.js"
 run "test_setbrand (setBrand values)"            "$HERE/test_setbrand.js" "$CBM/src/functions.js"
 run "bp_test (body-parser json/form/text)"       "$HERE/bp_test.js" "$CBM"
+run "test_hdmi (HDMI screen: paths, playlist, visitor switch)" "$HERE/test_hdmi.js" "$CBM/src/hdmi.js"
 rm -f /tmp/cbm_harness_out.txt
 [ $FAILED = 0 ] && echo "ALL PASSED" || echo "SOME TESTS FAILED"; exit $FAILED

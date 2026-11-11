@@ -289,6 +289,23 @@ app.put('/chat', function (req,res) {
 })
 
 // ---------------------------------------------------------------------------
+// HDMI screen (Raspberry Pi, 2026-11-11): the media page's "Play on HDMI"
+// endpoints must work without the admin login (visitors, when the admin has
+// allowed it), so they are mounted before the auth guard.  See hdmi.js.
+// ---------------------------------------------------------------------------
+const hdmi = require('./hdmi.js');
+
+/**
+ * True when the request comes from a logged-in admin whose session has not
+ * gone idle (the same test as the auth guard below, without renewing it).
+ */
+function isAdminSession(req) {
+	return !!(req.session && req.session.username && req.session.seen &&
+		Date.now() - req.session.seen <= ADMIN_IDLE_MS);
+}
+app.use('/admin/api/hdmi/public', hdmi.publicRouter(isAdminSession));
+
+// ---------------------------------------------------------------------------
 // Auth guard middleware — applied to all routes mounted after this point.
 // Must come after the /admin/api/auth and /chat endpoints so those remain
 // accessible without a session.
@@ -329,6 +346,9 @@ app.use(async function (req, res, next) {
 app.get('/admin/api/keepalive', function(req,res) {
 	res.send({code: 0, result: ['ok']});
 });
+
+// HDMI screen admin endpoints: playlist, playable media, status (hdmi.js)
+app.use('/admin/api/hdmi', hdmi.adminRouter());
 
 // Delegate the full admin API surface to the routes module.
 app.use('/admin/api', require('./routes/api.js'));
