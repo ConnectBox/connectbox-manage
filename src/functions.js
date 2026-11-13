@@ -619,21 +619,48 @@ set.courseusb = function(json) {
 	return true;
 }
 
-//DICT:SET:wipe (password): Erase SD Card and USB keys -- password is wipethebox
+/**
+ * Does password match the admin password (/usr/local/connectbox/etc/basicauth)?
+ * Same check as auth() in index.js: openssl apr1 hash with the box's salt,
+ * the password on openssl's standard input (never a shell), constant-time
+ * compare; empty, non-string and multi-line passwords never match.
+ *
+ * @param {*} password - What the admin typed.
+ * @returns {boolean} True when it is the admin password.
+ */
+function adminPasswordMatches(password) {
+	try {
+		if (typeof password !== 'string' || password === '' || /[\r\n\0]/.test(password)) return false;
+		var stored = fs.readFileSync('/usr/local/connectbox/etc/basicauth', 'utf-8').trim();
+		var hash = require('child_process').execFileSync('openssl',
+			['passwd', '-apr1', '-salt', 'CBOX2018', '-stdin'], {input: password + '\n'}).toString().trim();
+		var a = Buffer.from('admin:' + hash), b = Buffer.from(stored);
+		return a.length === b.length && require('crypto').timingSafeEqual(a, b);
+	}
+	catch (e) {
+		console.log(`ERROR: adminPasswordMatches: ${e.message}`);
+		return false;
+	}
+}
+
+//DICT:SET:wipe (password): Erase the SD card and every USB key -- the admin password
 /**
  * Emergency wipe ("Wipe All Storage"): starts scripts/wipe.sh, which makes the
  * SD card and every USB key unreadable within seconds and then keeps
- * overwriting them until the power goes (see the script).  Started by its
- * full path, detached in its own session (setsid) so it outlives this server,
- * which it stops along with everything else.  Until 2026-11-13 this ran
- * "scripts/wipe.sh" relative to pm2's working folder (/root), where it does
- * not exist, so the wipe never ran.
+ * overwriting them until the power goes (see the script).  Confirmed with the
+ * admin password, as the page asks (Kirk, 2026-11-13: a separate word is too
+ * hard to remember at such a time; until then it was the fixed word
+ * "wipethebox").  Started by its full path, detached in its own session
+ * (setsid) so it outlives this server, which it stops along with everything
+ * else.  Until 2026-11-13 this ran "scripts/wipe.sh" relative to pm2's working
+ * folder (/root), where it does not exist, so the wipe never ran.
  *
- * @param {{value: string}} json - Must be the confirmation word.
- * @returns {boolean} True when the wipe was started.
+ * @param {{value: string}} json - The admin password.
+ * @returns {boolean|{status: number, message: string}} True when the wipe was
+ *  started; a 403 answer for a wrong password (the page shows an error).
  */
 set.wipe = function(json) {
-    if (json.value === 'wipethebox') {
+    if (adminPasswordMatches(json ? json.value : undefined)) {
 	var script = require('path').join(__dirname, 'scripts', 'wipe.sh');
 	var child = spawn('/usr/bin/setsid', ['/bin/bash', script], {detached: true, stdio: 'ignore'});
 	child.on('error', function (e) { logger.log('error', `wipe: ${e.message}`); });
@@ -641,7 +668,7 @@ set.wipe = function(json) {
 	return true;
     }
     else {
-	return false;
+	return {status: 403, message: 'Wrong password: nothing was wiped'};
     }
 }
 
