@@ -31,5 +31,14 @@ F.setBrand({ value: 'lcd_pages_stats=0' });
 check('lcd_pages_stats fan-out', Object.keys(b()).filter(k => k.startsWith('lcd_pages_stats_')).every(k => b()[k] === 0), true);
 check('no lcd_pages_stats alias kept', 'lcd_pages_stats' in b(), false);
 F.setBrand({ value: 'server_siteadmin_phone=0123 456' }); check('phone stays text', b().server_siteadmin_phone, '0123 456');
+// IP addresses / Internet data page switches (2026-11-13): on when brand.j2 lacks them, then as saved
+{ const o = b(); delete o.lcd_pages_network; delete o.lcd_pages_internet; file = JSON.stringify(o); }
+check('lcd_pages_network missing reads 1', F.getBrand('lcd_pages_network'), 1);
+check('lcd_pages_internet missing reads 1', F.getBrand('lcd_pages_internet'), 1);
+check('other missing key still reads 0', F.getBrand('lcd_pages_no_such_page'), 0);
+F.setBrand({ value: 'lcd_pages_network=0' });  check('lcd_pages_network off saved as number', b().lcd_pages_network, 0);
+check('lcd_pages_network off reads 0', F.getBrand('lcd_pages_network'), 0);
+F.setBrand({ value: 'lcd_pages_internet=0' }); check('lcd_pages_internet off reads 0', F.getBrand('lcd_pages_internet'), 0);
+F.setBrand({ value: 'lcd_pages_internet=1' }); check('lcd_pages_internet on again', F.getBrand('lcd_pages_internet'), 1);
 console.log(pass + ' passed, ' + fail + ' failed' + (fs.existsSync(BRAND) ? '; real brand.j2 untouched' : ' (sample brand.j2)'));
 process.exit(fail ? 1 : 0);

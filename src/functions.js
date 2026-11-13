@@ -668,16 +668,26 @@ function getLogs(logName) {
  * Re-reads brand.j2 on every call so changes made by setBrand() are reflected
  * without restarting the server.  The special key 'lcd_pages_stats' is an
  * alias that maps to 'lcd_pages_stats_day_one' — the actual stored key —
- * because the admin UI uses the shorter alias name.
+ * because the admin UI uses the shorter alias name.  A key listed in
+ * BRAND_DEFAULT_ON that brand.j2 does not have reads as 1 (on).
  *
  * @param {string} key - Brand config key (e.g. 'Brand', 'server_url').
  * @returns {*} The value for the key, or 0 if the key does not exist.
  */
+// brand.j2 keys that count as on (1) when brand.j2 does not have them yet:
+// the front panel's IP addresses and Internet data pages (2026-11-13).  The
+// hat service also treats a missing key as on, so the admin switch shows what
+// the front panel does on boxes built before these keys existed.
+var BRAND_DEFAULT_ON = ['lcd_pages_network', 'lcd_pages_internet'];
+
 function getBrand(key) {
 	var brand = JSON.parse(fs.readFileSync('/usr/local/connectbox/brand.j2'));
 	if (key === 'lcd_pages_stats') {
 		// Special case where lcd_page_stats is a rollup of several settings
 		key = 'lcd_pages_stats_day_one';
+	}
+	if (!(key in brand) && BRAND_DEFAULT_ON.indexOf(key) >= 0) {
+		return(1);
 	}
 	return(brand[key] || 0);
 }
