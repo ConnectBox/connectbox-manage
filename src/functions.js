@@ -669,16 +669,58 @@ function getLogs(logName) {
  * without restarting the server.  The special key 'lcd_pages_stats' is an
  * alias that maps to 'lcd_pages_stats_day_one' — the actual stored key —
  * because the admin UI uses the shorter alias name.  A key listed in
- * BRAND_DEFAULT_ON that brand.j2 does not have reads as 1 (on).
+ * BRAND_DEFAULT_ON that brand.j2 does not have reads as 1 (on); a missing
+ * lcd_pages_internet reads as internet_sharing (on or off).
  *
  * @param {string} key - Brand config key (e.g. 'Brand', 'server_url').
  * @returns {*} The value for the key, or 0 if the key does not exist.
  */
 // brand.j2 keys that count as on (1) when brand.j2 does not have them yet:
-// the front panel's IP addresses and Internet data pages (2026-11-13).  The
-// hat service also treats a missing key as on, so the admin switch shows what
-// the front panel does on boxes built before these keys existed.
-var BRAND_DEFAULT_ON = ['lcd_pages_network', 'lcd_pages_internet'];
+// the front panel's IP addresses page (2026-11-13).  The hat service also
+// treats a missing key as on, so the admin switch shows what the front panel
+// does on boxes built before the key existed.  The Internet Data page
+// (lcd_pages_internet) instead follows internet sharing when missing.
+var BRAND_DEFAULT_ON = ['lcd_pages_network'];
+
+/**
+ * Is a brand.j2 value "on"?  1, "1", true and "true" are on; anything else,
+ * including a missing value, is off.
+ *
+ * @param {*} value - Value from brand.j2.
+ * @returns {boolean} True when on.
+ */
+function brandValueOn(value) {
+	return ['1', 'true'].indexOf(String(value).trim().toLowerCase()) >= 0;
+}
+
+/**
+ * The front panel's Internet Data page follows internet sharing (Kirk,
+ * 2026-11-13): its switch (lcd_pages_internet) is off by default; turning
+ * internet sharing on turns it on, and turning sharing off turns it off again
+ * unless the admin turned it on by hand.  lcd_pages_internet_auto is 1 while
+ * the switch is on only because sharing turned it on; any change the admin
+ * makes to the switch clears it, so the admin's choice is never undone.
+ * Changes brand (the parsed brand.j2) in place; the caller saves it.
+ *
+ * @param {object} brand - Parsed brand.j2.
+ * @param {string} key - The key that was just set.
+ */
+function followInternetSharing(brand, key) {
+	if (key === 'internet_sharing') {
+		var sharingOn = brandValueOn(brand.internet_sharing);
+		if (sharingOn && !brandValueOn(brand.lcd_pages_internet)) {
+			brand.lcd_pages_internet = 1;
+			brand.lcd_pages_internet_auto = 1;
+		}
+		else if (!sharingOn && brandValueOn(brand.lcd_pages_internet_auto)) {
+			brand.lcd_pages_internet = 0;
+			brand.lcd_pages_internet_auto = 0;
+		}
+	}
+	else if (key === 'lcd_pages_internet') {
+		brand.lcd_pages_internet_auto = 0;
+	}
+}
 
 function getBrand(key) {
 	var brand = JSON.parse(fs.readFileSync('/usr/local/connectbox/brand.j2'));
@@ -688,6 +730,10 @@ function getBrand(key) {
 	}
 	if (!(key in brand) && BRAND_DEFAULT_ON.indexOf(key) >= 0) {
 		return(1);
+	}
+	if (key === 'lcd_pages_internet' && !(key in brand)) {
+		// Older brand.j2: the Internet Data page is on while sharing is on
+		return(brandValueOn(brand.internet_sharing) ? 1 : 0);
 	}
 	return(brand[key] || 0);
 }
@@ -751,6 +797,10 @@ function setBrand(body) {
 				}
 			}
 		}
+	}
+	if (key) {
+		// Internet Data page switch follows internet sharing (see above)
+		followInternetSharing(brand, key);
 	}
 	if (key) {
 		// Whole file to a temporary name, then renamed into place, so the hat
