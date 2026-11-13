@@ -643,11 +643,12 @@ function adminPasswordMatches(password) {
 	}
 }
 
-//DICT:SET:wipe (password): Erase the SD card and every USB key -- the admin password
+//DICT:SET:wipe (password): Destroy every USB key and the media on the SD card -- the admin password
 /**
- * Emergency wipe ("Wipe All Storage"): starts scripts/wipe.sh, which makes the
- * SD card and every USB key unreadable within seconds and then keeps
- * overwriting them until the power goes (see the script).  Confirmed with the
+ * Emergency wipe ("Wipe All Storage"): starts scripts/wipe.sh, which destroys
+ * every USB key and the media (and its traces) on the SD card within seconds,
+ * keeps the system and the Wi-Fi off, and goes on overwriting the keys and the
+ * card's free space until the power goes (see the script).  Confirmed with the
  * admin password, as the page asks (Kirk, 2026-11-13: a separate word is too
  * hard to remember at such a time; until then it was the fixed word
  * "wipethebox").  Started by its full path, detached in its own session
@@ -662,7 +663,10 @@ function adminPasswordMatches(password) {
 set.wipe = function(json) {
     if (adminPasswordMatches(json ? json.value : undefined)) {
 	var script = require('path').join(__dirname, 'scripts', 'wipe.sh');
-	var child = spawn('/usr/bin/setsid', ['/bin/bash', script], {detached: true, stdio: 'ignore'});
+	// setsid -f forks: the script leaves this process's tree, so pm2 (which
+	//  kills a process's whole tree when it stops it) cannot stop the wipe
+	//  when the script stops pm2.
+	var child = spawn('/usr/bin/setsid', ['-f', '/bin/bash', script], {detached: true, stdio: 'ignore'});
 	child.on('error', function (e) { logger.log('error', `wipe: ${e.message}`); });
 	child.unref();
 	return true;

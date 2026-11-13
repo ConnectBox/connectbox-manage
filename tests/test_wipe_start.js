@@ -22,7 +22,7 @@ check('admin password accepted', F.set.wipe({ value: 'secret 1' }) === true, sta
 const s = started[0] || {};
 const script = path.join(path.dirname(process.argv[2]), 'scripts', 'wipe.sh');
 check('started with spawn (no shell)', s.f === 'spawn', s);
-check('in its own session: setsid bash <full path of wipe.sh>', s.cmd === '/usr/bin/setsid' && s.args && s.args[0] === '/bin/bash' && s.args[1] === script && path.isAbsolute(s.args[1]), s);
+check('own session, out of the process tree: setsid -f bash <full path of wipe.sh>', s.cmd === '/usr/bin/setsid' && s.args && s.args[0] === '-f' && s.args[1] === '/bin/bash' && s.args[2] === script && path.isAbsolute(s.args[2]), s);
 check('the script exists there', fs.existsSync(script), script);
 check('detached, no output kept', s.opts && s.opts.detached === true && s.opts.stdio === 'ignore', s.opts);
 console.log(pass + ' passed, ' + fail + ' failed'); process.exit(fail ? 1 : 0);
