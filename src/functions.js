@@ -619,14 +619,29 @@ set.courseusb = function(json) {
 	return true;
 }
 
-//DICT:SET:wipe (password): Erase SD Card -- password is wipethebox
+//DICT:SET:wipe (password): Erase SD Card and USB keys -- password is wipethebox
+/**
+ * Emergency wipe ("Wipe All Storage"): starts scripts/wipe.sh, which makes the
+ * SD card and every USB key unreadable within seconds and then keeps
+ * overwriting them until the power goes (see the script).  Started by its
+ * full path, detached in its own session (setsid) so it outlives this server,
+ * which it stops along with everything else.  Until 2026-11-13 this ran
+ * "scripts/wipe.sh" relative to pm2's working folder (/root), where it does
+ * not exist, so the wipe never ran.
+ *
+ * @param {{value: string}} json - Must be the confirmation word.
+ * @returns {boolean} True when the wipe was started.
+ */
 set.wipe = function(json) {
     if (json.value === 'wipethebox') {
-    	exec(`scripts/wipe.sh &`);
-	    return true;
+	var script = require('path').join(__dirname, 'scripts', 'wipe.sh');
+	var child = spawn('/usr/bin/setsid', ['/bin/bash', script], {detached: true, stdio: 'ignore'});
+	child.on('error', function (e) { logger.log('error', `wipe: ${e.message}`); });
+	child.unref();
+	return true;
     }
     else {
-    	return false;
+	return false;
     }
 }
 
