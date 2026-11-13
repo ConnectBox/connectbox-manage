@@ -863,6 +863,87 @@ function setBrand(body) {
 	return(body.value);
 }
 
+// Box Content (2026-11-13): copy the box's own content to / from a USB key
+// from the admin page.  The hat service runs the copy (the same commands as
+// the front panel's admin menu, connectbox-hat-service buttons.py): this
+// writes its request file and reads back its status file.  Both live in
+// /run/connectbox (CB_RUN_DIR for the tests).
+var BOXCONTENT_DIR = process.env.CB_RUN_DIR || '/run/connectbox';
+var BOXCONTENT_REQUEST = BOXCONTENT_DIR + '/boxcontent_request.json';
+var BOXCONTENT_STATUS = BOXCONTENT_DIR + '/boxcontent_status.json';
+var BOXCONTENT_COMMANDS = ['copy_from_usb', 'copy_to_usb'];
+// A command counts as still running this long after its last status line: a
+// copy reports every few seconds, but it can wait up to 5 minutes for a key
+// to be put in or taken out without a new line.
+var BOXCONTENT_BUSY_SECS = 360;
+
+/**
+ * Write obj as JSON to path through a temporary file renamed into place, so a
+ * reader never sees half a file.
+ *
+ * @param {string} path - Destination file.
+ * @param {object} obj - What to write.
+ */
+function writeJsonAtomic(path, obj) {
+	fs.mkdirSync(require('path').dirname(path), {recursive: true});
+	var tmp = path + '.tmp.' + process.pid;
+	fs.writeFileSync(tmp, JSON.stringify(obj));
+	fs.renameSync(tmp, path);
+}
+
+/**
+ * The hat service's status for the last Box Content command, with "age" (how
+ * many seconds ago it was written).  {state: 'idle'} when there is none.
+ *
+ * @returns {object} {state, text, command, source, id, time, age}.
+ */
+function readBoxContentStatus() {
+	var st;
+	try { st = JSON.parse(fs.readFileSync(BOXCONTENT_STATUS, 'utf8')); } catch (e) { st = null; }
+	if (!st || typeof st !== 'object' || Array.isArray(st)) st = {state: 'idle', text: '', time: 0};
+	st.age = Math.max(0, Math.round(Date.now() / 1000 - (Number(st.time) || 0)));
+	return st;
+}
+
+//DICT:GET:boxcontent: Status of the last copy to / from a USB key (state, text, command, age)
+get.boxcontent = function () {
+	return readBoxContentStatus();
+}
+
+//DICT:SET:boxcontent (copy_from_usb|copy_to_usb): Copy a USB key's content to the box, or the box's content to a key
+/**
+ * Ask the hat service to run a Box Content copy.  Refused (409) while one is
+ * running, from the admin page or the front panel.  The status file is set to
+ * "queued" at once so the page shows something before the hat service picks
+ * the request up (it looks every 2 s).
+ *
+ * @param {{value: string}} json - 'copy_from_usb' or 'copy_to_usb'.
+ * @returns {object|{status: number, message: string}} {id} when asked; 400
+ *  for an unknown command, 409 while busy, 500 if the files cannot be written.
+ */
+set.boxcontent = function (json) {
+	var command = json ? json.value : undefined;
+	if (BOXCONTENT_COMMANDS.indexOf(command) < 0) {
+		return {status: 400, message: 'Unknown command'};
+	}
+	var st = readBoxContentStatus();
+	if ((st.state === 'running' || st.state === 'queued') && st.age < BOXCONTENT_BUSY_SECS) {
+		return {status: 409, message: 'Busy: ' + (st.text || 'a copy is running')};
+	}
+	var now = Date.now() / 1000;
+	var id = String(Date.now()) + '-' + Math.floor(Math.random() * 1e6);
+	try {
+		writeJsonAtomic(BOXCONTENT_REQUEST, {command: command, id: id, time: now});
+		writeJsonAtomic(BOXCONTENT_STATUS, {state: 'queued', text: 'Starting', command: command,
+			source: 'web', id: id, time: now});
+	}
+	catch (e) {
+		logger.log('error', `set.boxcontent: ${e.message}`);
+		return {status: 500, message: 'Could not start the copy'};
+	}
+	return {id: id};
+}
+
 // Internet sharing data total (2026-11-05): PxUSBm adds what the sharing
 // firewall rules passed to /usr/local/connectbox/internet_usage.json (bytes,
 // kept across reboots).  Reset sets up/down to 0 and keeps PxUSBm's counter
