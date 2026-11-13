@@ -651,9 +651,9 @@ function adminPasswordMatches(password) {
  * card's free space until the power goes (see the script).  Confirmed with the
  * admin password, as the page asks (Kirk, 2026-11-13: a separate word is too
  * hard to remember at such a time; until then it was the fixed word
- * "wipethebox").  Started by its full path, detached in its own session
- * (setsid) so it outlives this server, which it stops along with everything
- * else.  Until 2026-11-13 this ran "scripts/wipe.sh" relative to pm2's working
+ * "wipethebox").  Started by its full path as its own systemd unit
+ * (systemd-run) so it outlives this server and pm2-root, which it stops along
+ * with everything else.  Until 2026-11-13 this ran "scripts/wipe.sh" relative to pm2's working
  * folder (/root), where it does not exist, so the wipe never ran.
  *
  * @param {{value: string}} json - The admin password.
@@ -663,10 +663,12 @@ function adminPasswordMatches(password) {
 set.wipe = function(json) {
     if (adminPasswordMatches(json ? json.value : undefined)) {
 	var script = require('path').join(__dirname, 'scripts', 'wipe.sh');
-	// setsid -f forks: the script leaves this process's tree, so pm2 (which
-	//  kills a process's whole tree when it stops it) cannot stop the wipe
-	//  when the script stops pm2.
-	var child = spawn('/usr/bin/setsid', ['-f', '/bin/bash', script], {detached: true, stdio: 'ignore'});
+	// Run as its own systemd unit: the script stops pm2-root, and systemd
+	//  then kills everything in that service's control group - with setsid
+	//  alone the wipe was killed there (2026-11-13 test on .36: services
+	//  stopped, nothing destroyed).  systemd-run returns once the unit runs.
+	var child = spawn('/usr/bin/systemd-run', ['--unit=connectbox-wipe-' + Date.now(), '--collect', '--quiet',
+		'/bin/bash', script], {detached: true, stdio: 'ignore'});
 	child.on('error', function (e) { logger.log('error', `wipe: ${e.message}`); });
 	child.unref();
 	return true;

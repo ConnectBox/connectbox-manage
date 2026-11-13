@@ -22,7 +22,10 @@ check('admin password accepted', F.set.wipe({ value: 'secret 1' }) === true, sta
 const s = started[0] || {};
 const script = path.join(path.dirname(process.argv[2]), 'scripts', 'wipe.sh');
 check('started with spawn (no shell)', s.f === 'spawn', s);
-check('own session, out of the process tree: setsid -f bash <full path of wipe.sh>', s.cmd === '/usr/bin/setsid' && s.args && s.args[0] === '-f' && s.args[1] === '/bin/bash' && s.args[2] === script && path.isAbsolute(s.args[2]), s);
+// its own systemd unit, so stopping pm2-root (KillMode=control-group) cannot kill it
+check('own systemd unit: systemd-run --unit=connectbox-wipe-* --collect bash <full path of wipe.sh>',
+  s.cmd === '/usr/bin/systemd-run' && s.args && /^--unit=connectbox-wipe-\d+$/.test(s.args[0]) && s.args.includes('--collect')
+  && s.args[s.args.length - 2] === '/bin/bash' && s.args[s.args.length - 1] === script && path.isAbsolute(script), s);
 check('the script exists there', fs.existsSync(script), script);
 check('detached, no output kept', s.opts && s.opts.detached === true && s.opts.stdio === 'ignore', s.opts);
 console.log(pass + ' passed, ' + fail + ' failed'); process.exit(fail ? 1 : 0);
