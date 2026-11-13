@@ -27,7 +27,8 @@
 #     key's own erase where it has one);
 #  4. FAST, SD card: delete the media and its traces (see MEDIA below), then
 #     fstrim, so a card that honours discard erases the freed blocks at once;
-#  5. FULL, until the power goes: random data over every USB key, and on the
+#  5. FULL, until the power goes, at idle priority: random data over every
+#     USB key, and on the
 #     SD card a file of random data that fills all free space, which is then
 #     deleted and trimmed; pass after pass (the media folders are emptied again
 #     each pass).  Disks are re-listed from /sys/block each pass, so a key
@@ -166,14 +167,18 @@ main() {
   run fstrim "$R/"
 
   # -- 5. full: overwrite, pass after pass -------------------------------------
+  # At idle CPU and disk priority: with nothing else running it goes just as
+  #  fast, but the front panel and SSH stay usable (2026-11-13 test on .36:
+  #  at normal priority the card was so busy that SSH and the panel stalled).
+  local LOW="nice -n 19 ionice -c 3"
   local pass=0
   while [ "$PASSES" = 0 ] || [ "$pass" -lt "$PASSES" ]; do
     pass=$(( pass + 1 ))
     for d in $(disks); do
-      [ "$d" = "$root" ] || bgrun dd if=/dev/urandom of="$DEV/$d" bs=4M
+      [ "$d" = "$root" ] || bgrun $LOW dd if=/dev/urandom of="$DEV/$d" bs=4M
     done
     # fill the card's free space with random data, then free and trim it
-    run dd if=/dev/urandom of="$FILL" bs=4M conv=fsync
+    run $LOW dd if=/dev/urandom of="$FILL" bs=4M conv=fsync
     run sync
     run rm -f "$FILL"
     delete_media
