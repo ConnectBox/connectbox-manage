@@ -25,6 +25,9 @@
 #     partition (superblocks, FAT tables, NTFS MFT start) and the first and
 #     last 8 MiB of the disk (MBR/GPT and the backup GPT), then blkdiscard (the
 #     key's own erase where it has one);
+#  3b. FAST, swap: swapoff (pages back into RAM), reset zram (it lets go of
+#     its writeback file), overwrite every swap file and zram backing file
+#     (/var/swap on Raspberry Pi OS) in place with random data;
 #  4. FAST, SD card: delete the media and its traces (see MEDIA below), then
 #     fstrim, so a card that honours discard erases the freed blocks at once;
 #  5. FULL, until the power goes, at idle priority: random data over every
@@ -45,13 +48,14 @@
 # of running them; WIPE_SYS / WIPE_DEV point at a fake /sys and /dev;
 # WIPE_ROOT_DISK names the disk holding /; WIPE_PASSES limits the full
 # passes; WIPE_MEDIA replaces /media; WIPE_ROOTFS is put in front of every
-# path on the SD card.
+# path on the SD card; WIPE_PROC replaces /proc (for /proc/swaps).
 
 main() {
   local DRY="${WIPE_DRY_RUN:-0}" SYS="${WIPE_SYS:-/sys}" DEV="${WIPE_DEV:-/dev}"
   local PASSES="${WIPE_PASSES:-0}"      # 0 = until the power goes
   local MEDIA_DIR="${WIPE_MEDIA:-/media}" R="${WIPE_ROOTFS:-}"
   local FILL="$R/var/.cbwipe-fill"
+  local PROC="${WIPE_PROC:-/proc}"
 
   # What is destroyed on the SD card (the contents, not the folders):
   #  the box's own content and anything under the USB mount points (once the
@@ -158,6 +162,39 @@ main() {
   local d
   for d in $(disks); do
     [ "$d" = "$root" ] || fast_disk "$d"
+  done
+
+  # -- 3b. fast: swap ------------------------------------------------------------
+  # Swapped-out memory can hold pieces of what the box showed or the chat.
+  #  swapoff brings every page back into RAM (zram too), the zram devices are
+  #  reset (that also lets go of their writeback file, /var/swap on Raspberry
+  #  Pi OS), then every swap file and backing file is overwritten in place
+  #  with random data (kept: the system uses it again after a reboot).
+  local swapfiles=("$R/var/swap") line f z bd
+  while read -r line; do
+    set -- $line
+    [ "${2:-}" = "file" ] && swapfiles+=("$R$1")
+  done < "$PROC/swaps"
+  for z in "$SYS"/block/zram*; do
+    [ -e "$z/backing_dev" ] || continue
+    read -r bd < "$z/backing_dev" 2>/dev/null || bd=none
+    case "$bd" in
+      none|"") ;;
+      /dev/loop*) [ -e "$SYS/block/${bd##*/}/loop/backing_file" ] && read -r f < "$SYS/block/${bd##*/}/loop/backing_file" && swapfiles+=("$R$f") ;;
+      *) swapfiles+=("$R$bd") ;;
+    esac
+  done
+  run swapoff -a
+  for z in "$SYS"/block/zram*; do
+    [ -e "$z/reset" ] && run sh -c "echo 1 > $z/reset"
+  done
+  local done_files=" "
+  for f in "${swapfiles[@]}"; do
+    case "$done_files" in *" $f "*) continue ;; esac     # each file once
+    done_files="$done_files$f "
+    [ -f "$f" ] || continue
+    local mib=$(( ($(stat -c %s "$f" 2>/dev/null || echo 0) + 1048575) / 1048576 ))
+    [ "$mib" -gt 0 ] && run dd if=/dev/urandom of="$f" bs=1M count="$mib" conv=notrunc,fsync
   done
 
   # -- 4. fast: SD card media and traces ---------------------------------------
